@@ -22,6 +22,35 @@ const X=C.getContext('2d');
 const W=390,H=844;
 C.width=W;C.height=H;
 
+// キャラクター画像
+const IMGS={};
+function loadImgs(){
+  [['co2','co2.png'],['h2','h2.png'],['metan','emetan.png']].forEach(([k,src])=>{
+    const img=new Image();img.src=src;IMGS[k]=img;
+  });
+}
+loadImgs();
+
+// 画像でキャラクターを描画（読み込めていない場合は丸でフォールバック）
+function drawChar(key,x,y,r,shadow){
+  x=Math.round(x);y=Math.round(y);
+  const img=IMGS[key];
+  if(shadow){X.shadowColor=shadow;X.shadowBlur=18;}
+  if(img&&img.complete&&img.naturalWidth>0){
+    X.save();
+    X.beginPath();X.arc(x,y,r,0,Math.PI*2);X.clip();
+    // キャラ本体を円内に収める（少し上寄せで足を自然にトリミング）
+    const s=r*2.3;
+    X.drawImage(img,x-s/2,y-s/2-r*0.08,s,s);
+    X.restore();
+  }else{
+    const fc={co2:'#44445a',h2:'#1144bb',metan:'#229944'};
+    const fe={co2:'worried',h2:'happy',metan:'excited'};
+    drawFace(x,y,r,fc[key]||'#555',fe[key]||'happy');
+  }
+  if(shadow)X.shadowBlur=0;
+}
+
 // キャンバスを画面にフィット
 function resize(){
   const sw=window.innerWidth,sh=window.innerHeight;
@@ -180,7 +209,7 @@ function updateTitle(){
 function drawTitle(){
   drawBG();
   X.globalAlpha=0.18;
-  for(const b of titleBubs)drawFace(b.x,b.y,b.r,b.type==='co2'?'#446':'#1144aa',b.type==='co2'?'worried':'happy');
+  for(const b of titleBubs)drawChar(b.type==='co2'?'co2':'h2',b.x,b.y,b.r);
   X.globalAlpha=1;
   drawP();
   // タイトルボックス
@@ -193,12 +222,11 @@ function drawTitle(){
   X.restore();
   // キャラ紹介
   const cy=H*.46;
-  drawFace(W*.16,cy,26,'#445566','worried');T('CO₂',W*.16,cy+36,12,'#aaa');T('捨てられる…',W*.16,cy+53,9,'#888');
+  drawChar('co2',W*.16,cy,26);T('CO₂',W*.16,cy+36,12,'#aaa');T('捨てられる…',W*.16,cy+53,9,'#888');
   T('＋',W*.42,cy,22,'#ffee66');
-  drawFace(W*.66,cy,24,'#114499','happy');T('H₂',W*.66,cy+36,12,'#88aaff');T('助けにいく！',W*.66,cy+53,9,'#5577bb');
+  drawChar('h2',W*.66,cy,24);T('H₂',W*.66,cy+36,12,'#88aaff');T('助けにいく！',W*.66,cy+53,9,'#5577bb');
   T('↓ 合体！',W/2,cy+78,15,'#ffee44');
-  X.shadowColor='#44ff88';X.shadowBlur=14;
-  drawFace(W/2,cy+130,30,'#22aa55','excited');X.shadowBlur=0;
+  drawChar('metan',W/2,cy+130,30,'#44ff88');
   T('eメタン誕生！',W/2,cy+172,14,'#66ffaa');T('→ 都市ガスへ',W/2,cy+190,10,'#449966');
   // スタートボタン
   X.globalAlpha=.6+Math.sin(frame*.09)*.35;
@@ -258,7 +286,7 @@ function drawS1(){
   drawBG();
   for(const b of s1.blobs){
     if(!b.alive){X.save();X.globalAlpha=b.scale;X.translate(b.x,b.y);X.scale(b.scale,b.scale);X.translate(-b.x,-b.y);}
-    drawFace(b.x,b.y,b.r,'#44445a','worried');
+    drawChar('co2',b.x,b.y,b.r);
     T('CO₂',b.x,b.y+b.r+12,Math.round(b.r*.52),'#aaa');
     if(!b.alive)X.restore();
   }
@@ -312,7 +340,7 @@ function drawS2(){
   drawBG();
   for(const h of s2.items){
     if(!h.alive){X.save();X.globalAlpha=h.scale;X.translate(h.x,h.y);X.scale(h.scale,h.scale);X.translate(-h.x,-h.y);}
-    drawFace(h.x,h.y,h.r,'#1144bb','happy');T('H₂',h.x,h.y+h.r+11,Math.round(h.r*.55),'#88aaff');
+    drawChar('h2',h.x,h.y,h.r);T('H₂',h.x,h.y+h.r+11,Math.round(h.r*.55),'#88aaff');
     if(!h.alive)X.restore();
   }
   for(const p of s2.poisons){
@@ -322,8 +350,7 @@ function drawS2(){
   }
   const pl=s2.pl;
   if(pl.inv<=0||Math.floor(pl.inv/5)%2===0){
-    X.shadowColor='#4488ff';X.shadowBlur=10;
-    drawFace(pl.x,pl.y,25,'#1144dd','happy');X.shadowBlur=0;
+    drawChar('h2',pl.x,pl.y,25,'#4488ff');
     T('H₂(あなた)',pl.x,pl.y+38,9,'#7799cc');
   }
   drawP();drawHUD();
@@ -379,7 +406,7 @@ function drawS3(){
   T('STAGE 3 ― メタネーション！',W/2,34,15,'#ffcc44');
   const cx=W/2,cy=H*.37;
   if(s3.phase<2||s3.flash>.3){
-    drawFace(cx,cy,40,'#44445a','worried');T('CO₂',cx,cy+55,14,'#999');
+    drawChar('co2',cx,cy,40);T('CO₂',cx,cy+55,14,'#999');
     if(s3.phase===0){
       const pr=Math.sin(frame*.08)*6;
       X.strokeStyle=`rgba(255,200,0,${.45+Math.sin(frame*.08)*.4})`;
@@ -391,7 +418,7 @@ function drawS3(){
   if(s3.phase<=1){
     for(const a of s3.h2Angs){
       const hx=cx+Math.cos(a)*s3.orbitR,hy=cy+Math.sin(a)*s3.orbitR*.8;
-      drawFace(hx,hy,20,'#1144cc','happy');T('H₂',hx,hy+28,10,'#88aaff');
+      drawChar('h2',hx,hy,20);T('H₂',hx,hy+28,10,'#88aaff');
     }
     if(s3.phase===0){
       X.strokeStyle='rgba(80,100,255,.15)';X.lineWidth=1;X.setLineDash([4,5]);
@@ -400,8 +427,7 @@ function drawS3(){
   }
   if(s3.meth.r>0){
     const pr=Math.sin(s3.meth.pulse)*4;
-    X.shadowColor='#44ff88';X.shadowBlur=22+pr;
-    drawFace(cx,cy,s3.meth.r+pr,'#229944','excited');X.shadowBlur=0;
+    drawChar('metan',cx,cy,s3.meth.r+pr,'#44ff88');
     T('eメタン！',cx,cy+s3.meth.r+22,15,'#66ffaa');
     for(let i=0;i<6;i++){const sa=(i/6)*Math.PI*2+frame*.06,sr=s3.meth.r+26+Math.sin(frame*.12+i)*5;T('★',cx+Math.cos(sa)*sr,cy+Math.sin(sa)*sr,13,'#ffee44');}
   }
@@ -463,8 +489,7 @@ function drawS4(){
   if(s4.timer<100){X.globalAlpha=.4+Math.sin(frame*.15)*.35;T('↓ タップして押し込め ↓',W/2,H*.52,13,'#ffff66');X.globalAlpha=1;}
   for(const b of s4.bubs){
     if(!b.alive){X.save();X.globalAlpha=b.scale;X.translate(b.x,b.y);X.scale(b.scale,b.scale);X.translate(-b.x,-b.y);}
-    X.shadowColor='#44ff88';X.shadowBlur=8;
-    drawFace(b.x,b.y,b.r,'#229944','excited');X.shadowBlur=0;
+    drawChar('metan',b.x,b.y,b.r,'#44ff88');
     T('eメタン',b.x,b.y+b.r+11,9,'#66ffaa');
     if(!b.alive)X.restore();
   }
