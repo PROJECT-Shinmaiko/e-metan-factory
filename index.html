@@ -21,7 +21,7 @@ function gp(e){const t=e.changedTouches?e.changedTouches[0]:e,r=C.getBoundingCli
 ['touchstart','touchmove','touchend','touchcancel'].forEach(ev=>document.addEventListener(ev,e=>e.preventDefault(),{passive:false}));
 
 // ── Layout ─────────────────────────────────────────────────
-const TOP=70,BOT=96;          // top-bar / dialogue-box height
+const TOP=58,BOT=96;          // top-bar / dialogue-box height
 const PT=TOP,PB=H-BOT;        // default play area
 const S2PB=H-210;             // S2 play area bottom (above joystick)
 const JCX=W/2,JCY=H-110,JR=74;// joystick
@@ -67,20 +67,43 @@ function burst(x,y,cs,n=40,sp=9){cs.forEach(c=>addP(x,y,c,Math.ceil(n/cs.length)
 function tickP(){for(let i=PTS.length-1;i>=0;i--){const p=PTS[i];p.x+=p.vx;p.y+=p.vy;p.vy+=.09;p.l-=p.d;if(p.l<=0)PTS.splice(i,1);}}
 function drawP(){for(const p of PTS){X.globalAlpha=Math.max(0,p.l);X.fillStyle=p.c;X.beginPath();X.arc(p.x,p.y,p.r*Math.max(.1,p.l),0,Math.PI*2);X.fill();}X.globalAlpha=1;}
 
-// ── Speech bubbles (big, RPG-style) ────────────────────────
+// ── Speech bubbles ─────────────────────────────────────────
+// Only 1 bubble at a time. Auto-position to avoid screen edges.
 const POPS=[];
-function pop(x,y,txt,c='#111'){POPS.push({x,y,txt,c,l:200,w:Math.min(340,txt.length*16+44)});}
+function pop(x,y,txt){
+  POPS.length=0; // clear all — max 1 visible
+  const w=Math.min(W-20,txt.length*15+44);
+  // direction: down if char is in top 35%, up otherwise
+  const dir=y<H*.35?'down':'up';
+  POPS.push({x,y,txt,w,l:220,dir});
+}
 function rRect(x,y,w,h,r){X.beginPath();X.moveTo(x+r,y);X.lineTo(x+w-r,y);X.arcTo(x+w,y,x+w,y+r,r);X.lineTo(x+w,y+h-r);X.arcTo(x+w,y+h,x+w-r,y+h,r);X.lineTo(x+r,y+h);X.arcTo(x,y+h,x,y+h-r,r);X.lineTo(x,y+r);X.arcTo(x,y,x+r,y,r);X.closePath();}
 function tickPops(){for(let i=POPS.length-1;i>=0;i--){POPS[i].l--;if(POPS[i].l<=0)POPS.splice(i,1);}}
 function drawPops(){
   for(const p of POPS){
-    const a=Math.min(1,p.l/25),bh=56;
-    const bx=Math.max(5,Math.min(W-p.w-5,p.x-p.w/2)),by=p.y-p.w/2*0-88;
-    X.globalAlpha=a;
-    X.fillStyle='rgba(255,252,225,.98)';rRect(bx,by,p.w,bh,10);X.fill();
-    X.strokeStyle='rgba(60,40,0,.2)';X.lineWidth=2;rRect(bx,by,p.w,bh,10);X.stroke();
-    X.fillStyle='rgba(255,252,225,.98)';X.beginPath();X.moveTo(p.x-9,by+bh);X.lineTo(p.x+9,by+bh);X.lineTo(p.x,by+bh+18);X.closePath();X.fill();
-    T(p.txt,bx+p.w/2,by+bh/2,20,p.c);
+    const alpha=Math.min(1,p.l/20),bh=54,MARGIN=8;
+    // clamp bubble X so it never leaves screen
+    const bx=Math.max(MARGIN,Math.min(W-p.w-MARGIN,p.x-p.w/2));
+    // Y: above or below character, clamped to play area
+    let by,tailUp;
+    if(p.dir==='down'){
+      by=Math.min(H-BOT-bh-MARGIN,p.y+40);tailUp=true;
+    }else{
+      by=Math.max(TOP+MARGIN,p.y-bh-44);tailUp=false;
+    }
+    X.globalAlpha=alpha;
+    // white rounded bubble
+    X.fillStyle='#fffde8';rRect(bx,by,p.w,bh,10);X.fill();
+    X.strokeStyle='rgba(50,30,0,.3)';X.lineWidth=2.5;rRect(bx,by,p.w,bh,10);X.stroke();
+    // tail — clamp tip X to bubble bounds
+    const tx=Math.max(bx+16,Math.min(bx+p.w-16,p.x));
+    X.fillStyle='#fffde8';X.beginPath();
+    if(tailUp){X.moveTo(tx-8,by);X.lineTo(tx+8,by);X.lineTo(tx,by-16);}
+    else      {X.moveTo(tx-8,by+bh);X.lineTo(tx+8,by+bh);X.lineTo(tx,by+bh+16);}
+    X.closePath();X.fill();
+    // text — plain bold black, NO shadow, NO glow, maximum readability
+    X.save();X.font='900 20px sans-serif';X.textAlign='center';X.textBaseline='middle';
+    X.fillStyle='#111111';X.fillText(p.txt,bx+p.w/2,by+bh/2);X.restore();
     X.globalAlpha=1;
   }
 }
@@ -125,11 +148,14 @@ function T(s,x,y,sz,c,a='center'){
 // ── Top bar ────────────────────────────────────────────────
 function topBar(title,progress){
   X.fillStyle='rgba(0,8,32,.98)';X.fillRect(0,0,W,TOP);
-  // bright green bottom border
   X.strokeStyle='rgba(68,255,130,.6)';X.lineWidth=2.5;
   X.beginPath();X.moveTo(0,TOP);X.lineTo(W,TOP);X.stroke();
-  T(title,W/2,22,22,'#ccffe8');
-  if(progress!=null)T(progress,W/2,48,21,'#ffffff');
+  if(progress!=null){
+    T(title,W/2,17,18,'#ccffe8');
+    T(progress,W/2,40,20,'#ffffff');
+  }else{
+    T(title,W/2,28,20,'#ccffe8');
+  }
 }
 
 // ── RPG dialogue box (bottom) ──────────────────────────────
@@ -185,14 +211,14 @@ function updBoss(blobs){
   boss.x=Math.max(boss.r,Math.min(W-boss.r,boss.x));boss.y=Math.max(PT+18,Math.min(PB-90,boss.y));
   for(const b of blobs){if(!b.alive)continue;if((b.x-boss.x)**2+(b.y-boss.y)**2<(boss.r+b.r-.5)**2){b.alive=false;burst(b.x,b.y,['#555','#888'],6,3);}}
   boss.tT--;
-  if(boss.tT<=0){pop(boss.x,boss.y-boss.r-60,BSAY[Math.floor(Math.random()*3)],'#880000');boss.tT=210;}
+  if(boss.tT<=0){pop(boss.x,boss.y-boss.r-60,BSAY[Math.floor(Math.random()*3)]);boss.tT=210;}
   boss.sT++;if(boss.sT>420){boss.vis=false;boss.sT=0;boss.ns=150;}
 }
 function tapBoss(x,y){
   if(!boss.vis||boss.def)return false;
   if((x-boss.x)**2+(y-boss.y)**2>(boss.r+24)**2)return false;
   boss.hp--;tone(120,.2,.15,'sawtooth');burst(boss.x,boss.y,['#ff4444','#ff8800'],12,5);
-  pop(boss.x,boss.y-boss.r-60,boss.hp>0?'痛い！！':'くっ…CO₂も資源だったのか…','#cc0000');
+  pop(boss.x,boss.y-boss.r-60,boss.hp>0?'痛い！！':'くっ…CO₂も資源だったのか…');
   if(boss.hp<=0){boss.def=true;burst(boss.x,boss.y,['#44ff88','#ffff00','#ff8800'],70,11);tone(880,.4,.25);}
   return true;
 }
@@ -256,7 +282,7 @@ function upd1(){
   }
   s1.blobs=s1.blobs.filter(b=>b.alive||b.sc>0);
   updBoss(s1.blobs);
-  if(boss.def&&boss.dT===1){for(let i=0;i<2;i++)spCO2();pop(W/2,H*.4,'CO₂くんが解放された！','#22cc66');}
+  if(boss.def&&boss.dT===1){for(let i=0;i<2;i++)spCO2();pop(W/2,H*.4,'CO₂くんが解放された！');}
   tickP();tickPops();
   if(s1.caught>=s1.need&&!s1.done){s1.done=true;s1.msg='CO₂救出完了！次のステージへ！';s1.mT=9999;}
   if(s1.done){s1.dT++;if(s1.dT===120)fade(ST.S2);}
@@ -276,7 +302,7 @@ function tap1(x,y){
 }
 function draw1(){
   bgSpace();
-  X.globalAlpha=.04;T('南部浄化センター',W/2,H/2,40,'#fff');X.globalAlpha=1;
+  X.globalAlpha=.025;T('南部浄化センター',W/2,H/2,26,'#fff');X.globalAlpha=1;
   for(const b of s1.blobs){
     X.save();if(!b.alive){X.globalAlpha=b.sc;X.translate(b.x,b.y);X.scale(b.sc,b.sc);X.translate(-b.x,-b.y);}
     drawChar('co2',b.x,b.y,b.r);T('CO₂',b.x,b.y+b.r+20,18,'#ddeeff');
@@ -309,7 +335,7 @@ function upd2(){
     h.w+=.04;h.y+=h.vy;h.x+=Math.sin(h.w)*.85;h.x=Math.max(h.r,Math.min(W-h.r,h.x));
     if((pl.x-h.x)**2+(pl.y-h.y)**2<(52+h.r)**2){
       h.alive=false;s2.caught++;burst(h.x,h.y,['#4488ff','#88ccff'],18,6);
-      pop(pl.x,pl.y-60,HSAY[Math.floor(Math.random()*4)],'#224488');tone(660,.1,.12);
+      pop(pl.x,pl.y-60,HSAY[Math.floor(Math.random()*4)]);tone(660,.1,.12);
     }
   }
   s2.items=s2.items.filter(h=>(h.alive||h.sc>0)&&h.y<S2PB+50);
@@ -325,7 +351,7 @@ function upd2(){
 }
 function draw2(){
   bgSpace('#06101e');
-  X.globalAlpha=.04;T('消化タンク',W/2,H/2,40,'#fff');X.globalAlpha=1;
+  X.globalAlpha=.025;T('消化タンク',W/2,H/2,26,'#fff');X.globalAlpha=1;
   X.strokeStyle='rgba(68,120,200,.22)';X.lineWidth=1.5;X.setLineDash([7,5]);X.beginPath();X.moveTo(0,S2PB);X.lineTo(W,S2PB);X.stroke();X.setLineDash([]);
   for(const h of s2.items){
     X.save();if(!h.alive){X.globalAlpha=h.sc;X.translate(h.x,h.y);X.scale(h.sc,h.sc);X.translate(-h.x,-h.y);}
@@ -378,7 +404,7 @@ function tap3(x,y){
 }
 function draw3(){
   bgSpace('#08061c');
-  X.globalAlpha=.04;T('知多LNG共同基地',W/2,H/2,38,'#fff');X.globalAlpha=1;
+  X.globalAlpha=.025;T('知多LNG共同基地',W/2,H/2,26,'#fff');X.globalAlpha=1;
   if(s3dk>0){X.fillStyle=`rgba(0,0,6,${s3dk})`;X.fillRect(0,0,W,H);}
   const cx=W/2,cy=H*.42;
   X.save();if(shake>.5)X.translate((Math.random()-.5)*shake,(Math.random()-.5)*shake);
@@ -433,7 +459,7 @@ function tap4(x,y){
 }
 function draw4(){
   bgCity(0);
-  X.globalAlpha=.04;T('都市ガス配管',W/2,H/2,38,'#fff');X.globalAlpha=1;
+  X.globalAlpha=.025;T('都市ガス配管',W/2,H/2,26,'#fff');X.globalAlpha=1;
   X.fillStyle='#181800';X.fillRect(0,PIPY,W,42);
   X.fillStyle=`rgba(68,255,100,${.45+Math.sin(frame*.06)*.2})`;X.fillRect(0,PIPY,W,9);
   for(let px=14;px<W;px+=58){X.fillStyle='#252500';X.fillRect(px,PIPY-18,26,18);}
@@ -486,12 +512,16 @@ function drawE1(){
   bgCity(eLit);
   X.strokeStyle=`rgba(68,255,100,${.5+Math.sin(frame*.07)*.25})`;X.lineWidth=8;X.beginPath();X.moveTo(0,H-BOT-58);X.lineTo(W,H-BOT-58);X.stroke();
   T('都市ガス管',W/2,H-BOT-40,17,'#88ff88');
-  [[W*.2,H*.28,'🛁','お風呂が沸いた！','#66aaff',20],
-   [W*.5, H*.31,'🍳','ご飯ができた！','#ff9955',65],
-   [W*.8, H*.28,'🏭','工場が動き出した！','#44ff88',110]].forEach(([x,y,icon,lbl,c,at])=>{
+  // 3 icons stacked vertically — text on 2 lines so it never clips on 320px screens
+  [[H*.22,'🛁','お風呂が','沸いた！','#66aaff',20],
+   [H*.44,'🍳','ご飯が','できた！','#ff9955',65],
+   [H*.66,'🏭','工場が','動き出した！','#44ff88',110]].forEach(([y,icon,l1,l2,c,at])=>{
     if(eT<at)return;const a=Math.min(1,(eT-at)/35);X.globalAlpha=a;
-    X.shadowColor=c;X.shadowBlur=28+Math.sin(frame*.08)*8;
-    T(icon,x,y,56,c);X.shadowBlur=0;T(lbl,x,y+62,22,c);X.globalAlpha=1;
+    X.shadowColor=c;X.shadowBlur=22+Math.sin(frame*.08)*6;
+    T(icon,W/2,y,52,c);X.shadowBlur=0;
+    T(l1,W/2,y+60,24,c);
+    T(l2,W/2,y+88,24,c);
+    X.globalAlpha=1;
   });
   if(eT>110){X.globalAlpha=.6+Math.sin(frame*.1)*.32;T('タップして続ける ▶',W/2,H*.92,20,'#88ffcc');X.globalAlpha=1;}
   drawP();
