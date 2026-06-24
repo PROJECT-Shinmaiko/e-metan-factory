@@ -1,0 +1,1009 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>eメタンファクトリー ～CO₂を救え！～</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;background:#050510;display:flex;align-items:center;justify-content:center;overflow:hidden}
+canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;touch-action:none}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const C=document.getElementById('c');
+const X=C.getContext('2d');
+const W=390,H=844;
+C.width=W;C.height=H;
+function resize(){
+  const s=Math.min(innerWidth/W,innerHeight/H);
+  C.style.width=(W*s)+'px';C.style.height=(H*s)+'px';
+}
+addEventListener('resize',resize);resize();
+
+// ---- STATE ----
+let state='title';
+let frame=0;
+let co2Gauge=0,h2Gauge=0,methGauge=0,gasGauge=0;
+let particles=[];
+let stageMessage='';
+let messageTimer=0;
+let stageTimer=0;
+let fadeAlpha=0;
+let fadeDir=0;
+let afterFade=null;
+
+// Stars
+const stars=Array.from({length:60},()=>({
+  x:Math.random()*W,y:Math.random()*H,
+  s:Math.random()*2+1,t:Math.random()*Math.PI*2
+}));
+
+// ---- FADE TRANSITION ----
+function fadeToNext(fn){
+  fadeDir=1;fadeAlpha=0;
+  afterFade=fn;
+}
+
+// ---- PARTICLES ----
+function spawnP(x,y,col,n,spd){
+  for(let i=0;i<n;i++){
+    const a=Math.random()*Math.PI*2;
+    const s=(0.5+Math.random())*spd;
+    particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,r:2+Math.random()*5,col,life:1,dec:0.018+Math.random()*0.02});
+  }
+}
+function spawnStarburst(x,y,colors){
+  for(let i=0;i<8;i++){
+    const a=(i/8)*Math.PI*2;
+    const s=4+Math.random()*4;
+    const col=colors[Math.floor(Math.random()*colors.length)];
+    particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,r:4+Math.random()*6,col,life:1,dec:0.012});
+  }
+}
+function updateP(){
+  for(let i=particles.length-1;i>=0;i--){
+    const p=particles[i];
+    p.x+=p.vx;p.y+=p.vy;p.vy+=0.08;p.life-=p.dec;
+    if(p.life<=0)particles.splice(i,1);
+  }
+}
+function drawP(){
+  for(const p of particles){
+    X.globalAlpha=Math.max(0,p.life);
+    X.fillStyle=p.col;
+    X.beginPath();X.arc(p.x,p.y,p.r*p.life,0,Math.PI*2);X.fill();
+  }
+  X.globalAlpha=1;
+}
+
+// ---- DRAW FACE ----
+function face(x,y,r,col,expr){
+  x=Math.round(x);y=Math.round(y);
+  X.fillStyle=col;
+  X.beginPath();X.arc(x,y,r,0,Math.PI*2);X.fill();
+  // border
+  X.strokeStyle='rgba(0,0,0,0.4)';X.lineWidth=2;
+  X.beginPath();X.arc(x,y,r,0,Math.PI*2);X.stroke();
+  // eyes
+  const ew=Math.max(3,r*0.18),eh=Math.max(4,r*0.22);
+  const ex1=x-r*0.32,ex2=x+r*0.12,ey=y-r*0.12;
+  if(expr==='worried'){
+    X.fillStyle='#fff';
+    X.fillRect(ex1,ey,ew,eh);
+    X.fillRect(ex2,ey,ew,eh);
+    X.fillStyle='#222';
+    X.fillRect(ex1+1,ey+2,ew*0.6,eh*0.6);
+    X.fillRect(ex2+1,ey+2,ew*0.6,eh*0.6);
+    // worried brows
+    X.fillStyle='#444';
+    X.save();X.translate(ex1+ew/2,ey-4);X.rotate(0.3);
+    X.fillRect(-ew,0,ew*2,2);X.restore();
+    X.save();X.translate(ex2+ew/2,ey-4);X.rotate(-0.3);
+    X.fillRect(-ew,0,ew*2,2);X.restore();
+    // frown
+    X.strokeStyle='#222';X.lineWidth=Math.max(2,r*0.08);
+    X.beginPath();X.arc(x,y+r*0.3,r*0.2,Math.PI*0.15,Math.PI*0.85);X.stroke();
+  } else if(expr==='happy'){
+    X.fillStyle='#fff';
+    X.fillRect(ex1,ey,ew,eh);
+    X.fillRect(ex2,ey,ew,eh);
+    X.fillStyle='#222';
+    X.fillRect(ex1+1,ey+2,ew*0.6,eh*0.6);
+    X.fillRect(ex2+1,ey+2,ew*0.6,eh*0.6);
+    // smile
+    X.strokeStyle='#222';X.lineWidth=Math.max(2,r*0.08);
+    X.beginPath();X.arc(x,y+r*0.15,r*0.22,0,Math.PI);X.stroke();
+  } else if(expr==='excited'){
+    // star eyes
+    X.fillStyle='#ffee00';
+    drawStar(ex1+ew/2,ey+eh/2,r*0.17);
+    drawStar(ex2+ew/2,ey+eh/2,r*0.17);
+    // big mouth
+    X.fillStyle='#cc3300';
+    X.beginPath();X.arc(x,y+r*0.28,r*0.22,0,Math.PI);X.fill();
+    X.fillStyle='#fff';
+    X.fillRect(x-r*0.16,y+r*0.28,r*0.1,r*0.06);
+    X.fillRect(x+r*0.06,y+r*0.28,r*0.1,r*0.06);
+  } else if(expr==='scared'){
+    X.fillStyle='#fff';
+    X.beginPath();X.arc(ex1+ew/2,ey+eh/2,ew*0.8,0,Math.PI*2);X.fill();
+    X.beginPath();X.arc(ex2+ew/2,ey+eh/2,ew*0.8,0,Math.PI*2);X.fill();
+    X.fillStyle='#222';
+    X.beginPath();X.arc(ex1+ew/2,ey+eh/2,ew*0.45,0,Math.PI*2);X.fill();
+    X.beginPath();X.arc(ex2+ew/2,ey+eh/2,ew*0.45,0,Math.PI*2);X.fill();
+    // O mouth
+    X.strokeStyle='#222';X.lineWidth=2;
+    X.beginPath();X.arc(x,y+r*0.3,r*0.14,0,Math.PI*2);X.stroke();
+  }
+}
+
+function drawStar(x,y,r){
+  X.beginPath();
+  for(let i=0;i<5;i++){
+    const a=(i/5)*Math.PI*2-Math.PI/2;
+    const a2=a+Math.PI/5;
+    i===0?X.moveTo(x+Math.cos(a)*r,y+Math.sin(a)*r):X.lineTo(x+Math.cos(a)*r,y+Math.sin(a)*r);
+    X.lineTo(x+Math.cos(a2)*r*0.38,y+Math.sin(a2)*r*0.38);
+  }
+  X.closePath();X.fill();
+}
+
+// ---- TEXT ----
+function txt(s,x,y,sz,col,align='center'){
+  X.save();
+  X.font=`bold ${sz}px 'Courier New',monospace`;
+  X.textAlign=align;X.textBaseline='middle';
+  X.strokeStyle='rgba(0,0,0,0.9)';X.lineWidth=sz*0.18;
+  X.strokeText(s,x,y);
+  X.fillStyle=col;X.fillText(s,x,y);
+  X.restore();
+}
+
+// ---- GAUGE ----
+function gauge(label,val,x,y,w,h,col){
+  X.fillStyle='#0a0a20';
+  X.fillRect(x,y,w,h);
+  X.strokeStyle='#333';X.lineWidth=1.5;
+  X.strokeRect(x,y,w,h);
+  const fw=(w-4)*Math.min(1,val/100);
+  const grad=X.createLinearGradient(x+2,0,x+2+fw,0);
+  grad.addColorStop(0,col);grad.addColorStop(1,col+'cc');
+  X.fillStyle=grad;
+  X.fillRect(x+2,y+2,fw,h-4);
+  txt(label,x+6,y+h/2,9,'#ddd','left');
+  txt(Math.round(val)+'%',x+w-4,y+h/2,9,'#ddd','right');
+}
+
+// ---- BACKGROUND ----
+function drawBG(tint){
+  const g=X.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,tint||'#06061a');g.addColorStop(1,'#0a1a0a');
+  X.fillStyle=g;X.fillRect(0,0,W,H);
+  for(const s of stars){
+    s.t+=0.015;
+    X.globalAlpha=0.35+Math.sin(s.t)*0.25;
+    X.fillStyle='#fff';
+    X.fillRect(Math.round(s.x),Math.round(s.y),s.s,s.s);
+  }
+  X.globalAlpha=1;
+  drawFactorySilhouette();
+}
+
+function drawFactorySilhouette(){
+  X.fillStyle='#040d04';
+  X.fillRect(0,H-110,W,110);
+  const buildings=[
+    [15,H-200,75,100],[110,H-175,55,85],[220,H-195,45,95],[300,H-215,75,115]
+  ];
+  for(const[bx,by,bw,bh]of buildings){
+    X.fillStyle='#071007';X.fillRect(bx,by,bw,bh);
+    X.fillStyle='rgba(100,255,80,0.08)';
+    for(let wy=by+12;wy<by+bh-12;wy+=20)
+      for(let wx=bx+8;wx<bx+bw-8;wx+=18)
+        X.fillRect(wx,wy,10,8);
+  }
+  // chimneys
+  const chimneys=[[30,H-255,14],[55,H-270,11],[290,H-265,12],[320,H-250,10],[140,H-240,12]];
+  for(const[cx,cy,cw]of chimneys){
+    X.fillStyle='#0a120a';X.fillRect(cx,cy,cw,H-110-cy);
+  }
+  X.strokeStyle='#112011';X.lineWidth=2;
+  X.beginPath();X.moveTo(0,H-110);X.lineTo(W,H-110);X.stroke();
+}
+
+// ---- HUD ----
+function drawHUD(){
+  const gw=(W-28)/3;
+  const gy=H-95;
+  gauge('CO₂回収',co2Gauge,10,gy,gw,20,'#888');
+  gauge('水素回収',h2Gauge,10+gw+4,gy,gw,20,'#4488ff');
+  gauge('eメタン',methGauge,10+gw*2+8,gy,gw,20,'#44ff88');
+  if(state==='stage4'||state==='ending')
+    gauge('出荷量',gasGauge,10,H-70,W-20,20,'#ffcc00');
+}
+
+// ---- STAGE MESSAGE ----
+function drawMsg(){
+  if(messageTimer<=0||!stageMessage)return;
+  const a=Math.min(1,messageTimer/30);
+  X.globalAlpha=a;
+  X.fillStyle='rgba(0,5,20,0.82)';
+  X.fillRect(8,H-138,W-16,32);
+  X.strokeStyle='rgba(100,200,100,0.4)';X.lineWidth=1;
+  X.strokeRect(8,H-138,W-16,32);
+  txt(stageMessage,W/2,H-122,13,'#ffff88');
+  X.globalAlpha=1;
+}
+
+function showMsg(m,t){stageMessage=m;messageTimer=t||150;}
+
+// ==============================
+// STAGE 1 – CO₂ COLLECTION
+// ==============================
+let co2Blobs=[];
+let co2Caught=0;
+const CO2_NEED=22;
+let combo=0,comboTimer=0;
+
+function initS1(){
+  co2Blobs=[];co2Caught=0;co2Gauge=0;
+  particles=[];combo=0;comboTimer=0;stageTimer=0;
+  for(let i=0;i<9;i++)spawnCO2Blob();
+  showMsg('CO₂は捨てるだけじゃない！タップしてつかまえよう！',200);
+}
+
+function spawnCO2Blob(){
+  const r=18+Math.random()*16;
+  const spd=0.6+Math.random()*1.2;
+  const ang=Math.random()*Math.PI*2;
+  co2Blobs.push({
+    x:r+Math.random()*(W-r*2),
+    y:60+Math.random()*(H-250),
+    r,vx:Math.cos(ang)*spd,vy:Math.sin(ang)*spd,
+    w:Math.random()*Math.PI*2,ws:0.025+Math.random()*0.02,
+    alive:true,scale:1,flash:0
+  });
+}
+
+function updateS1(){
+  stageTimer++;
+  if(stageTimer%80===0&&co2Blobs.filter(b=>b.alive).length<12)spawnCO2Blob();
+  for(const b of co2Blobs){
+    if(!b.alive){b.scale=Math.max(0,b.scale-0.07);continue;}
+    b.w+=b.ws;b.flash=Math.max(0,b.flash-0.05);
+    b.x+=b.vx+Math.sin(b.w)*0.4;
+    b.y+=b.vy+Math.cos(b.w*1.3)*0.3;
+    if(b.x<b.r){b.vx=Math.abs(b.vx);b.x=b.r;}
+    if(b.x>W-b.r){b.vx=-Math.abs(b.vx);b.x=W-b.r;}
+    if(b.y<60){b.vy=Math.abs(b.vy);b.y=60;}
+    if(b.y>H-200){b.vy=-Math.abs(b.vy);b.y=H-200;}
+  }
+  for(let i=co2Blobs.length-1;i>=0;i--)
+    if(!co2Blobs[i].alive&&co2Blobs[i].scale<=0)co2Blobs.splice(i,1);
+  updateP();
+  if(comboTimer>0)comboTimer--;
+  if(messageTimer>0)messageTimer--;
+  if(co2Gauge>=100&&state==='stage1'){
+    state='trans';showMsg('CO₂回収完了！ 次は水素を集めよう！',1);
+    setTimeout(()=>{initS2();state='stage2';},1600);
+  }
+}
+
+function tapS1(tx,ty){
+  for(const b of co2Blobs){
+    if(!b.alive)continue;
+    const dx=tx-b.x,dy=ty-b.y;
+    if(dx*dx+dy*dy<(b.r+14)*(b.r+14)){
+      b.alive=false;
+      co2Caught++;
+      co2Gauge=Math.min(100,(co2Caught/CO2_NEED)*100);
+      if(comboTimer>0)combo++;else combo=1;
+      comboTimer=55;
+      spawnP(b.x,b.y,'#888',8,3);
+      spawnP(b.x,b.y,'#44ff88',5,2);
+      if(combo>=3){
+        spawnStarburst(b.x,b.y,['#ffff00','#ff8800','#ff4444']);
+        showMsg(`${combo}コンボ！すごい！`,70);
+      }
+      break;
+    }
+  }
+}
+
+function drawS1(){
+  drawBG('#06061a');
+  for(const b of co2Blobs){
+    X.save();
+    if(!b.alive){
+      X.globalAlpha=b.scale;
+      X.translate(b.x,b.y);X.scale(b.scale,b.scale);X.translate(-b.x,-b.y);
+    } else if(b.flash>0){
+      X.globalAlpha=1-b.flash*0.3;
+    }
+    if(b.flash>0){X.shadowColor='#ffff00';X.shadowBlur=15;}
+    face(b.x,b.y,b.r,'#4a4a55','worried');
+    X.shadowBlur=0;
+    txt('CO₂',b.x,b.y+b.r+11,Math.round(b.r*0.52),'#aaa');
+    X.restore();
+  }
+  drawP();
+  // Combo
+  if(combo>=2&&comboTimer>0){
+    const a=Math.min(1,comboTimer/20)*Math.sin(frame*0.3+1)*0.3+0.7;
+    X.globalAlpha=Math.min(1,comboTimer/20)*a;
+    txt(`${combo} COMBO!`,W/2,H/2-20,30,'#ffcc00');
+    X.globalAlpha=1;
+  }
+  drawHUD();drawMsg();
+  txt('STAGE 1 － CO₂かいしゅう',W/2,36,15,'#88ffcc');
+  txt(`のこり ${Math.max(0,CO2_NEED-co2Caught)} 個`,W/2,58,12,'#66aa88');
+}
+
+// ==============================
+// STAGE 2 – H₂ COLLECTION
+// ==============================
+let player={x:W/2,y:H*0.7,tx:W/2,ty:H*0.7,inv:0};
+let h2Items=[];
+let poisons=[];
+let h2Caught=0;
+const H2_NEED=28;
+
+function initS2(){
+  h2Items=[];poisons=[];h2Caught=0;h2Gauge=0;
+  particles=[];stageTimer=0;
+  player={x:W/2,y:H*0.72,tx:W/2,ty:H*0.72,inv:0};
+  for(let i=0;i<4;i++){
+    const a=Math.random()*Math.PI*2;
+    poisons.push({
+      x:Math.random()*W*0.8+W*0.1,
+      y:80+Math.random()*(H*0.55),
+      r:16+Math.random()*8,
+      vx:Math.cos(a)*(0.8+Math.random()),
+      vy:Math.sin(a)*(0.8+Math.random())
+    });
+  }
+  showMsg('H₂を集めてCO₂と合体しよう！ 毒ガス☠に注意！',200);
+}
+
+function spawnH2(){
+  h2Items.push({
+    x:25+Math.random()*(W-50),y:-25,
+    r:14+Math.random()*8,
+    vy:1.2+Math.random()*1.4,
+    w:Math.random()*Math.PI*2,
+    alive:true,scale:1
+  });
+}
+
+function updateS2(){
+  stageTimer++;
+  const rate=Math.max(35,70-stageTimer/60);
+  if(stageTimer%Math.round(rate)===0)spawnH2();
+
+  // move player
+  const pdx=player.tx-player.x,pdy=player.ty-player.y;
+  const pd=Math.sqrt(pdx*pdx+pdy*pdy);
+  if(pd>3){player.x+=pdx*0.13;player.y+=pdy*0.13;}
+  player.x=Math.max(25,Math.min(W-25,player.x));
+  player.y=Math.max(80,Math.min(H-160,player.y));
+  if(player.inv>0)player.inv--;
+
+  // H2 items
+  for(const h of h2Items){
+    if(!h.alive){h.scale=Math.max(0,h.scale-0.1);continue;}
+    h.w+=0.04;h.y+=h.vy;h.x+=Math.sin(h.w)*0.7;
+    if(h.x<h.r)h.x=h.r;if(h.x>W-h.r)h.x=W-h.r;
+    const dx=player.x-h.x,dy=player.y-h.y;
+    if(dx*dx+dy*dy<(26+h.r)*(26+h.r)){
+      h.alive=false;h2Caught++;
+      h2Gauge=Math.min(100,(h2Caught/H2_NEED)*100);
+      spawnP(h.x,h.y,'#4488ff',10,3);
+      spawnP(h.x,h.y,'#88ccff',5,2);
+    }
+  }
+  for(let i=h2Items.length-1;i>=0;i--){
+    const h=h2Items[i];
+    if(h.y>H-80||(!h.alive&&h.scale<=0))h2Items.splice(i,1);
+  }
+
+  // poisons
+  for(const p of poisons){
+    p.x+=p.vx;p.y+=p.vy;
+    if(p.x<p.r){p.vx=Math.abs(p.vx);p.x=p.r;}
+    if(p.x>W-p.r){p.vx=-Math.abs(p.vx);p.x=W-p.r;}
+    if(p.y<70){p.vy=Math.abs(p.vy);p.y=70;}
+    if(p.y>H-200){p.vy=-Math.abs(p.vy);p.y=H-200;}
+    if(player.inv<=0){
+      const dx=player.x-p.x,dy=player.y-p.y;
+      if(dx*dx+dy*dy<(26+p.r)*(26+p.r)){
+        player.inv=70;
+        spawnP(player.x,player.y,'#ff4444',14,3);
+        showMsg('あぶない！☠ 毒ガスにぶつかった！',80);
+      }
+    }
+  }
+
+  updateP();
+  if(messageTimer>0)messageTimer--;
+  if(h2Gauge>=100&&state==='stage2'){
+    state='trans';showMsg('水素回収完了！ いよいよ合成だ！',1);
+    setTimeout(()=>{initS3();state='stage3';},1600);
+  }
+}
+
+function tapS2(tx,ty){
+  player.tx=tx;player.ty=Math.min(ty,H-160);
+}
+
+function drawS2(){
+  drawBG('#05060f');
+  // H2 items (falling)
+  for(const h of h2Items){
+    X.save();
+    if(!h.alive){X.globalAlpha=h.scale;X.translate(h.x,h.y);X.scale(h.scale,h.scale);X.translate(-h.x,-h.y);}
+    face(h.x,h.y,h.r,'#2255cc','happy');
+    txt('H₂',h.x,h.y+h.r+10,Math.round(h.r*0.55),'#88aaff');
+    X.restore();
+  }
+  // poisons
+  for(const p of poisons){
+    X.fillStyle='#550000';X.beginPath();X.arc(p.x,p.y,p.r,0,Math.PI*2);X.fill();
+    X.strokeStyle='#ff2200';X.lineWidth=2;X.beginPath();X.arc(p.x,p.y,p.r,0,Math.PI*2);X.stroke();
+    txt('☠',p.x,p.y,p.r*1.1,'#ff4444');
+    txt('毒ガス',p.x,p.y+p.r+10,9,'#cc2200');
+  }
+  // player
+  if(player.inv<=0||Math.floor(player.inv/5)%2===0){
+    X.shadowColor='#4488ff';X.shadowBlur=12;
+    face(player.x,player.y,24,'#3366ee','happy');
+    X.shadowBlur=0;
+    txt('H₂（あなた）',player.x,player.y+38,9,'#88aaff');
+  }
+  drawP();drawHUD();drawMsg();
+  txt('STAGE 2 － 水素かいしゅう',W/2,36,15,'#88ccff');
+  txt(`のこり ${Math.max(0,H2_NEED-h2Caught)} 個`,W/2,58,12,'#5588bb');
+}
+
+// ==============================
+// STAGE 3 – METHANATION
+// ==============================
+let s3Phase=0,s3Timer=0,s3Flash=0;
+let s3CO2={x:W/2,y:H*0.34,r:42};
+let s3H2s=[];
+let s3Meth=null;
+
+function initS3(){
+  s3Phase=0;s3Timer=0;s3Flash=0;s3Meth=null;particles=[];stageTimer=0;
+  s3CO2={x:W/2,y:H*0.34,r:42};
+  s3H2s=[];
+  for(let i=0;i<4;i++){
+    const a=(i/4)*Math.PI*2;
+    s3H2s.push({x:W/2+Math.cos(a)*140,y:H*0.34+Math.sin(a)*120,r:20,a,orb:130});
+  }
+  showMsg('CO₂とH₂が引き合っている…！',200);
+}
+
+function updateS3(){
+  stageTimer++;s3Timer++;
+  if(s3Phase===0){
+    // H2s orbit inward
+    for(const h of s3H2s){
+      h.a+=0.025;
+      h.orb=Math.max(52,h.orb-0.45);
+      h.x=W/2+Math.cos(h.a)*h.orb;
+      h.y=H*0.34+Math.sin(h.a)*(h.orb*0.85);
+    }
+    if(s3Timer>130){s3Phase=1;s3Timer=0;showMsg('はんのう開始！ CO₂ ＋ 4H₂ →',80);}
+  } else if(s3Phase===1){
+    s3Flash=Math.min(1,s3Timer/20);
+    spawnP(W/2,H*0.34,'#ffff00',2,9);
+    spawnP(W/2,H*0.34,'#fff',2,7);
+    if(s3Timer>30){
+      s3Phase=2;s3Timer=0;
+      s3Meth={x:W/2,y:H*0.34,r:0,targetR:58,pulse:0};
+      s3Flash=1.2;
+      spawnStarburst(W/2,H*0.34,['#44ff88','#ffff00','#88ffcc','#ffcc00']);
+      for(let i=0;i<5;i++)spawnStarburst(W/2+Math.cos(i/5*Math.PI*2)*30,H*0.34+Math.sin(i/5*Math.PI*2)*25,['#44ff88','#fff']);
+      spawnP(W/2,H*0.34,'#44ff88',60,10);
+      spawnP(W/2,H*0.34,'#ffff44',40,8);
+      methGauge=100;
+      showMsg('✨ eメタン誕生！！ CO₂が生まれ変わった！ ✨',280);
+    }
+  } else if(s3Phase===2){
+    s3Flash=Math.max(0,s3Flash-0.025);
+    if(s3Meth){
+      s3Meth.r=Math.min(s3Meth.targetR,s3Meth.r+2.5);
+      s3Meth.pulse+=0.07;
+    }
+    if(s3Timer%20===0)spawnP(
+      s3Meth?s3Meth.x:W/2,(s3Meth?s3Meth.y:H*0.34)-60,
+      Math.random()<0.5?'#44ff88':'#88ffcc',4,2
+    );
+    if(s3Timer>220&&state==='stage3'){
+      state='trans';
+      setTimeout(()=>{initS4();state='stage4';},1200);
+    }
+  }
+  updateP();
+  if(messageTimer>0)messageTimer--;
+}
+
+function drawS3(){
+  drawBG('#0a0520');
+  if(s3Flash>0){
+    X.fillStyle=`rgba(220,255,200,${Math.min(0.85,s3Flash*0.9)})`;
+    X.fillRect(0,0,W,H);
+  }
+  txt('STAGE 3 － メタネーション！',W/2,36,15,'#ffcc44');
+  if(s3Phase<2||(s3Meth&&s3Flash>0.3)){
+    face(s3CO2.x,s3CO2.y,s3CO2.r,'#444455','scared');
+    txt('CO₂',s3CO2.x,s3CO2.y+s3CO2.r+14,14,'#aaa');
+  }
+  if(s3Phase===0){
+    X.strokeStyle='rgba(60,100,255,0.18)';X.lineWidth=1;X.setLineDash([4,4]);
+    X.beginPath();X.arc(W/2,H*0.34,s3H2s[0]?.orb||130,0,Math.PI*2);X.stroke();
+    X.setLineDash([]);
+    for(const h of s3H2s){
+      face(h.x,h.y,h.r,'#2255cc','happy');
+      txt('H₂',h.x,h.y+h.r+10,10,'#88aaff');
+    }
+  } else if(s3Phase===1&&s3Flash<0.6){
+    for(const h of s3H2s){
+      face(h.x,h.y,h.r,'#2255cc','happy');
+      txt('H₂',h.x,h.y+h.r+10,10,'#88aaff');
+    }
+  }
+  if(s3Meth&&s3Meth.r>0){
+    const pr=Math.sin(s3Meth.pulse)*4;
+    X.shadowColor='#44ff88';X.shadowBlur=25+pr*2;
+    face(s3Meth.x,s3Meth.y,s3Meth.r+pr,'#22bb66','excited');
+    X.shadowBlur=0;
+    txt('eメタン！',s3Meth.x,s3Meth.y+s3Meth.r+20,15,'#66ffaa');
+    // sparkles
+    for(let i=0;i<6;i++){
+      const sa=(i/6)*Math.PI*2+frame*0.06;
+      const sr=s3Meth.r+22+Math.sin(frame*0.12+i)*6;
+      txt('★',s3Meth.x+Math.cos(sa)*sr,s3Meth.y+Math.sin(sa)*sr,14,'#ffee44');
+    }
+  }
+  drawP();drawHUD();drawMsg();
+}
+
+// ==============================
+// STAGE 4 – GAS DISTRIBUTION
+// ==============================
+let methBubs=[];
+let gasDelivered=0;
+const GAS_NEED=16;
+const PIPE_Y=H-165;
+let s4Timer=0;
+let windPuffs=[];
+
+function initS4(){
+  methBubs=[];gasDelivered=0;gasGauge=0;particles=[];
+  s4Timer=0;windPuffs=[];stageTimer=0;
+  showMsg('eメタンをタップしてガス管へ送り込め！',200);
+}
+
+function spawnMeth(){
+  methBubs.push({
+    x:30+Math.random()*(W-60),
+    y:H*0.18+Math.random()*H*0.25,
+    r:18,vx:(Math.random()-0.5)*0.6,vy:-0.3,
+    w:Math.random()*Math.PI*2,
+    alive:true,scale:1
+  });
+}
+
+function updateS4(){
+  stageTimer++;s4Timer++;
+  if(s4Timer%55===0&&methBubs.filter(b=>b.alive).length<7)spawnMeth();
+  for(const b of methBubs){
+    if(!b.alive){b.scale=Math.max(0,b.scale-0.07);continue;}
+    b.w+=0.03;
+    b.x+=b.vx+Math.sin(b.w)*0.5;
+    b.y+=b.vy;
+    b.vy=Math.min(b.vy+0.04,2);
+    if(b.x<b.r){b.vx=Math.abs(b.vx);b.x=b.r;}
+    if(b.x>W-b.r){b.vx=-Math.abs(b.vx);b.x=W-b.r;}
+    if(b.y<55){b.vy=Math.abs(b.vy)*0.5;b.y=55;}
+    if(b.y>PIPE_Y-b.r){
+      b.y=PIPE_Y-b.r;b.vy=Math.abs(b.vy)*-0.5;
+      spawnP(b.x,PIPE_Y,'#44ff88',4,1.5);
+      if(b.y>=PIPE_Y-b.r-5&&Math.abs(b.vy)<0.5){
+        // deliver if touching pipe
+        const delivered=tapMeth(b.x,b.y);
+      }
+    }
+  }
+  for(let i=methBubs.length-1;i>=0;i--){
+    if(!methBubs[i].alive&&methBubs[i].scale<=0)methBubs.splice(i,1);
+  }
+  for(let i=windPuffs.length-1;i>=0;i--){
+    const p=windPuffs[i];p.x+=p.vx;p.y+=p.vy;p.life-=0.04;
+    if(p.life<=0)windPuffs.splice(i,1);
+  }
+  updateP();
+  if(messageTimer>0)messageTimer--;
+  if(gasGauge>=100&&state==='stage4'){
+    state='trans';showMsg('出荷完了！ eメタンが街へ届く！',1);
+    setTimeout(()=>{initEnding();state='ending';},1500);
+  }
+}
+
+function tapMeth(tx,ty){
+  let hit=false;
+  for(const b of methBubs){
+    if(!b.alive)continue;
+    const dx=tx-b.x,dy=ty-b.y;
+    const dist=Math.sqrt(dx*dx+dy*dy);
+    if(dist<b.r+22){
+      // push toward pipe
+      b.vx+=(dx/Math.max(1,dist))*2.5;
+      b.vy+=1.8;
+      // wind puff
+      windPuffs.push({x:tx,y:ty,vx:(Math.random()-0.5)*2,vy:-1,life:0.8});
+      spawnP(tx,ty,'#88ffcc',4,2);
+      // deliver if near pipe
+      if(b.y>PIPE_Y-50){
+        b.alive=false;gasDelivered++;
+        gasGauge=Math.min(100,(gasDelivered/GAS_NEED)*100);
+        spawnP(b.x,PIPE_Y,'#44ff88',18,4);
+        spawnP(b.x,PIPE_Y,'#ffcc00',8,3);
+        spawnStarburst(b.x,PIPE_Y-5,['#44ff88','#88ffcc','#ffcc00']);
+        hit=true;
+      }
+      break;
+    }
+  }
+  return hit;
+}
+
+function drawS4(){
+  drawBG('#040c10');
+  // pipe
+  X.fillStyle='#1a1a00';X.fillRect(0,PIPE_Y,W,30);
+  X.fillStyle='#2a2a00';X.fillRect(0,PIPE_Y,W,8);
+  X.strokeStyle='#448800';X.lineWidth=1.5;
+  X.beginPath();X.moveTo(0,PIPE_Y);X.lineTo(W,PIPE_Y);X.stroke();
+  // pipe connections
+  for(let px=15;px<W;px+=50){
+    X.fillStyle='#333300';X.fillRect(px,PIPE_Y-12,18,12);
+    X.fillStyle='#555500';X.fillRect(px+3,PIPE_Y-10,12,9);
+  }
+  txt('🏠 都市ガス管 🏭',W/2,PIPE_Y+15,11,'#aacc00');
+  // gas flow effect
+  if(gasDelivered>0){
+    X.strokeStyle='rgba(68,255,136,0.3)';X.lineWidth=3;X.setLineDash([8,6]);
+    X.beginPath();X.moveTo(0,PIPE_Y+20);X.lineTo(W,PIPE_Y+20);X.stroke();
+    X.setLineDash([]);
+  }
+  // wind puffs
+  for(const p of windPuffs){
+    X.globalAlpha=p.life*0.4;
+    X.fillStyle='#88ffcc';X.beginPath();X.arc(p.x,p.y,8*p.life,0,Math.PI*2);X.fill();
+    X.globalAlpha=1;
+  }
+  // methane bubbles
+  for(const b of methBubs){
+    X.save();
+    if(!b.alive){X.globalAlpha=b.scale;X.translate(b.x,b.y);X.scale(b.scale,b.scale);X.translate(-b.x,-b.y);}
+    X.shadowColor='#44ff88';X.shadowBlur=10;
+    face(b.x,b.y,b.r,'#22aa55','excited');
+    X.shadowBlur=0;
+    txt('eメタン',b.x,b.y+b.r+11,9,'#66ffaa');
+    X.restore();
+  }
+  // tap hint early on
+  if(stageTimer<90){
+    X.globalAlpha=0.5+Math.sin(frame*0.15)*0.4;
+    txt('👇 タップでプッシュ！ 👇',W/2,H*0.48,13,'#ffff66');
+    X.globalAlpha=1;
+  }
+  drawP();drawHUD();drawMsg();
+  txt('STAGE 4 － 都市ガスしゅっか',W/2,36,15,'#44ff88');
+  txt(`出荷 ${gasDelivered} / ${GAS_NEED}`,W/2,58,12,'#226644');
+}
+
+// ==============================
+// ENDING
+// ==============================
+let endTimer=0;
+let endPhase=0;
+let cityFlicker=0;
+
+function initEnding(){
+  endTimer=0;endPhase=0;particles=[];
+  cityFlicker=0;stageTimer=0;
+}
+
+function updateEnding(){
+  endTimer++;stageTimer++;
+  if(endTimer===80){endPhase=1;spawnStarburst(W/2,H*0.55,['#44ff88','#ffff00','#ff8800','#88ffcc']);}
+  if(endTimer===120){endPhase=2;for(let i=0;i<8;i++)spawnStarburst(Math.random()*W,Math.random()*H*0.6,['#ffff00','#44ff88','#ff8800']);}
+  if(endTimer>200&&endTimer%35===0){
+    spawnP(Math.random()*W,Math.random()*H*0.5,'#ffff44',8,4);
+    spawnP(Math.random()*W,Math.random()*H*0.5,'#44ff88',6,3);
+  }
+  cityFlicker=Math.sin(frame*0.08)*0.15+0.85;
+  updateP();
+}
+
+function drawEnding(){
+  const g=X.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#020818');g.addColorStop(1,'#02180a');
+  X.fillStyle=g;X.fillRect(0,0,W,H);
+  for(const s of stars){
+    s.t+=0.02;X.globalAlpha=0.5+Math.sin(s.t)*0.3;
+    X.fillStyle='#fff';X.fillRect(Math.round(s.x),Math.round(s.y),s.s,s.s);
+  }
+  X.globalAlpha=1;
+  drawP();
+
+  if(endPhase>=1){
+    // city scene
+    drawEndingCity();
+  }
+  // main message
+  const pulse=Math.sin(frame*0.07)*0.06+0.97;
+  X.save();X.translate(W/2,H*0.08);X.scale(pulse,pulse);
+  X.fillStyle='rgba(0,20,10,0.88)';
+  X.fillRect(-175,-30,350,70);
+  X.strokeStyle='#44ff88';X.lineWidth=2;X.strokeRect(-175,-30,350,70);
+  txt('CO₂はエネルギーに',0,-12,19,'#44ff88');
+  txt('生まれ変わった！',0,14,19,'#44ff88');
+  X.restore();
+
+  if(endTimer>130){
+    const a2=Math.min(1,(endTimer-130)/50);
+    X.globalAlpha=a2;
+    X.fillStyle='rgba(0,10,5,0.85)';
+    X.fillRect(10,H*0.75,W-20,82);
+    X.strokeStyle='rgba(68,255,136,0.3)';X.lineWidth=1;
+    X.strokeRect(10,H*0.75,W-20,82);
+    txt('知多市では実際に',W/2,H*0.775,13,'#88ffcc');
+    txt('eメタンの実証が行われています',W/2,H*0.8,13,'#88ffcc');
+    txt('CO₂→ 水素 → eメタン → 都市ガス',W/2,H*0.825,11,'#66aa88');
+    X.globalAlpha=1;
+  }
+
+  if(endTimer>280){
+    const ba=0.65+Math.sin(frame*0.1)*0.3;
+    X.globalAlpha=ba;
+    X.fillStyle='#1a4422';
+    X.fillRect(W/2-95,H-80,190,48);
+    X.strokeStyle='#44ff88';X.lineWidth=2;
+    X.strokeRect(W/2-95,H-80,190,48);
+    txt('もう一度あそぶ',W/2,H-57,16,'#88ffcc');
+    X.globalAlpha=1;
+  }
+}
+
+function drawEndingCity(){
+  const lit=endPhase>=2;
+  // houses
+  drawHouse(40,H*0.56,lit,'#ff6600','🔥');
+  drawHouse(150,H*0.52,lit,'#ff8800','🍳');
+  drawHouse(270,H*0.55,lit,'#ffcc00','♨');
+  // factory
+  drawEndFactory(W/2-25,H*0.62,lit);
+  // pipe
+  X.fillStyle=lit?'#334400':'#1a1a00';
+  X.fillRect(0,H*0.72,W,18);
+  if(lit){
+    X.strokeStyle='rgba(68,255,136,0.5)';X.lineWidth=2;X.setLineDash([10,6]);
+    X.beginPath();X.moveTo(0,H*0.72+9);X.lineTo(W,H*0.72+9);X.stroke();
+    X.setLineDash([]);
+    txt('都市ガス管',W/2,H*0.72+27,11,'#88cc44');
+  }
+}
+
+function drawHouse(x,y,lit,glowCol,icon){
+  const w=70,h=55;
+  // roof
+  X.fillStyle=lit?'#882200':'#2a1a1a';
+  X.beginPath();X.moveTo(x,y);X.lineTo(x+w,y);X.lineTo(x+w/2,y-38);X.closePath();X.fill();
+  // body
+  X.fillStyle=lit?'#f5e8c0':'#2a2a2a';
+  X.fillRect(x+4,y,w-8,h);
+  // door
+  X.fillStyle=lit?'#8b4513':'#1a1a1a';
+  X.fillRect(x+w/2-8,y+h-24,16,24);
+  // windows
+  const wc=lit?`rgba(255,220,80,${cityFlicker})`:'#111';
+  X.fillStyle=wc;
+  if(lit){X.shadowColor=glowCol;X.shadowBlur=12;}
+  X.fillRect(x+6,y+8,16,12);X.fillRect(x+w-22,y+8,16,12);
+  X.shadowBlur=0;
+  if(lit)txt(icon,x+w/2,y+h*0.45,20,'#ffaa00');
+}
+
+function drawEndFactory(x,y,lit){
+  X.fillStyle=lit?'#0a2010':'#0a0a0a';
+  X.fillRect(x,y,80,50);X.fillRect(x-18,y+10,28,40);X.fillRect(x+70,y+12,28,38);
+  // chimneys
+  X.fillStyle=lit?'#1a3a1a':'#111';
+  X.fillRect(x+5,y-38,12,40);X.fillRect(x+25,y-52,11,55);X.fillRect(x+48,y-35,11,38);
+  if(lit){
+    X.fillStyle='rgba(68,255,136,0.3)';
+    for(let i=0;i<3;i++){
+      const cx=[x+11,x+30,x+53][i];
+      X.beginPath();X.arc(cx,y-45+Math.sin(frame*0.05+i*2)*5,9,0,Math.PI*2);X.fill();
+    }
+    X.fillStyle='rgba(255,255,80,0.8)';
+    X.fillRect(x+8,y+8,12,9);X.fillRect(x+28,y+8,12,9);X.fillRect(x+50,y+8,12,9);
+    txt('eメタン工場',x+40,y+62,10,'#44cc66');
+  }
+}
+
+// ==============================
+// TITLE SCREEN
+// ==============================
+let titleBubbles=[];
+let titleTimer=0;
+
+function initTitle(){
+  titleBubbles=[];titleTimer=0;
+  for(let i=0;i<8;i++){
+    const t=Math.random()<0.5?'co2':'h2';
+    titleBubbles.push({
+      x:Math.random()*W,y:Math.random()*H,
+      r:14+Math.random()*18,
+      vx:(Math.random()-0.5)*0.7,vy:(Math.random()-0.5)*0.7,
+      w:Math.random()*Math.PI*2,type:t
+    });
+  }
+}
+
+function updateTitle(){
+  titleTimer++;
+  for(const b of titleBubbles){
+    b.w+=0.015;b.x+=b.vx+Math.sin(b.w)*0.3;b.y+=b.vy;
+    if(b.x<-b.r)b.x=W+b.r;if(b.x>W+b.r)b.x=-b.r;
+    if(b.y<-b.r)b.y=H+b.r;if(b.y>H+b.r)b.y=-b.r;
+  }
+  updateP();
+}
+
+function drawTitle(){
+  const g=X.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#04041a');g.addColorStop(1,'#041504');
+  X.fillStyle=g;X.fillRect(0,0,W,H);
+  for(const s of stars){
+    s.t+=0.012;X.globalAlpha=0.3+Math.sin(s.t)*0.2;
+    X.fillStyle='#fff';X.fillRect(Math.round(s.x),Math.round(s.y),s.s,s.s);
+  }
+  X.globalAlpha=1;
+  // bg molecules
+  for(const b of titleBubbles){
+    X.globalAlpha=0.25;
+    if(b.type==='co2')face(b.x,b.y,b.r,'#445','worried');
+    else face(b.x,b.y,b.r,'#224488','happy');
+    X.globalAlpha=1;
+  }
+  drawP();
+  // title box
+  const pulse=Math.sin(frame*0.04)*0.02+1;
+  X.save();X.translate(W/2,H*0.19);X.scale(pulse,pulse);
+  X.fillStyle='rgba(0,10,30,0.92)';X.fillRect(-175,-42,350,86);
+  X.strokeStyle='#44ff88';X.lineWidth=2.5;X.strokeRect(-175,-42,350,86);
+  txt('eメタンファクトリー',0,-19,20,'#44ff88');
+  txt('〜 CO₂ を救え！ 〜',0,12,15,'#ffcc44');
+  X.restore();
+
+  // character lineup
+  const cy=H*0.46;
+  face(W*0.18,cy,28,'#445566','worried');
+  txt('CO₂',W*0.18,cy+38,12,'#aaa');
+  txt('捨てられる…',W*0.18,cy+55,9,'#888');
+
+  txt('＋',W*0.42,cy,22,'#ffff66');
+
+  face(W*0.62,cy,26,'#2255cc','happy');
+  txt('H₂',W*0.62,cy+38,12,'#88aaff');
+  txt('助けにいく！',W*0.62,cy+55,9,'#6688cc');
+
+  txt('↓ 合体！',W/2,cy+82,16,'#ffff44');
+
+  X.shadowColor='#44ff88';X.shadowBlur=18;
+  face(W/2,cy+138,34,'#22bb66','excited');
+  X.shadowBlur=0;
+  txt('eメタン誕生！',W/2,cy+182,14,'#66ffaa');
+  txt('→ 都市ガスとして使える',W/2,cy+198,10,'#448866');
+
+  // stage flow
+  const fy=cy+228;
+  X.fillStyle='rgba(0,10,5,0.75)';X.fillRect(10,fy,W-20,56);
+  X.strokeStyle='rgba(68,255,136,0.2)';X.lineWidth=1;X.strokeRect(10,fy,W-20,56);
+  const stages=['①CO₂回収','②水素回収','③合成','④出荷'];
+  const sw=(W-20)/4;
+  for(let i=0;i<4;i++){
+    const sc=['#888','#4488ff','#44ff88','#ffcc00'][i];
+    txt(stages[i],20+sw*i+sw/2,fy+16,10,sc);
+    if(i<3){X.fillStyle='#444';X.fillRect(20+sw*(i+1)-2,fy+10,8,3);}
+  }
+  txt('知多市 南部浄化センター eメタン事業',W/2,fy+40,9,'#335533');
+
+  // start button
+  const ba=0.65+Math.sin(frame*0.09)*0.3;
+  X.globalAlpha=ba;
+  X.fillStyle='#114422';X.fillRect(W/2-105,H-110,210,52);
+  X.strokeStyle='#44ff88';X.lineWidth=2.5;X.strokeRect(W/2-105,H-110,210,52);
+  txt('タップしてスタート！',W/2,H-85,17,'#88ffcc');
+  X.globalAlpha=1;
+}
+
+// ==============================
+// INPUT
+// ==============================
+function getXY(e){
+  const rect=C.getBoundingClientRect();
+  const sx=W/rect.width,sy=H/rect.height;
+  const t=e.changedTouches?e.changedTouches[0]:e;
+  return{x:(t.clientX-rect.left)*sx,y:(t.clientY-rect.top)*sy};
+}
+
+C.addEventListener('touchstart',e=>{e.preventDefault();const p=getXY(e);onTap(p.x,p.y);},{passive:false});
+C.addEventListener('touchmove',e=>{e.preventDefault();const p=getXY(e);onMove(p.x,p.y);},{passive:false});
+C.addEventListener('click',e=>{const p=getXY(e);onTap(p.x,p.y);});
+C.addEventListener('mousemove',e=>{if(e.buttons){const p=getXY(e);onMove(p.x,p.y);}});
+
+function onTap(tx,ty){
+  if(state==='title'){
+    spawnStarburst(tx,ty,['#44ff88','#ffff00','#88ccff']);
+    state='stage1';initS1();
+  } else if(state==='stage1')tapS1(tx,ty);
+  else if(state==='stage2')tapS2(tx,ty);
+  else if(state==='stage4')tapMeth(tx,ty);
+  else if(state==='ending'&&endTimer>280&&ty>H-80&&ty<H-32&&tx>W/2-95&&tx<W/2+95){
+    co2Gauge=0;h2Gauge=0;methGauge=0;gasGauge=0;
+    particles=[];state='title';initTitle();
+  }
+}
+function onMove(tx,ty){
+  if(state==='stage2')tapS2(tx,ty);
+  else if(state==='stage4')tapMeth(tx,ty);
+}
+
+// ==============================
+// MAIN LOOP
+// ==============================
+initTitle();
+
+function loop(){
+  frame++;
+  X.clearRect(0,0,W,H);
+
+  if(state==='title'){updateTitle();drawTitle();}
+  else if(state==='stage1'){updateS1();drawS1();}
+  else if(state==='stage2'){updateS2();drawS2();}
+  else if(state==='stage3'){updateS3();drawS3();}
+  else if(state==='stage4'){updateS4();drawS4();}
+  else if(state==='ending'){updateEnding();drawEnding();}
+  else if(state==='trans'){
+    // draw fade overlay
+    fadeAlpha=Math.min(1,fadeAlpha+0.05);
+    X.fillStyle=`rgba(0,0,0,${fadeAlpha})`;
+    X.fillRect(0,0,W,H);
+    if(messageTimer>0)messageTimer--;
+    // show message during fade
+    if(stageMessage){
+      X.globalAlpha=Math.min(1,fadeAlpha*2);
+      X.fillStyle='rgba(0,10,5,0.85)';
+      X.fillRect(20,H/2-30,W-40,60);
+      X.strokeStyle='#44ff88';X.lineWidth=1.5;
+      X.strokeRect(20,H/2-30,W-40,60);
+      txt(stageMessage,W/2,H/2,15,'#88ffcc');
+      X.globalAlpha=1;
+    }
+  }
+
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>
