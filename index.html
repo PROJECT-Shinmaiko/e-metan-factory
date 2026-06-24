@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>eメタンファクトリー</title>
+<title>eメタンファクトリー Ver.2</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{width:100%;height:100%;background:#000;overflow:hidden;touch-action:none}
@@ -14,178 +14,181 @@ html,body{width:100%;height:100%;background:#000;overflow:hidden;touch-action:no
 <body>
 <canvas id="c"></canvas>
 <script>
-// ============================================================
-//  eメタンファクトリー ～CO₂を救え！～
-// ============================================================
 const C=document.getElementById('c');
 const X=C.getContext('2d');
 const W=390,H=844;
 C.width=W;C.height=H;
-
-// キャラクター画像
-const IMGS={};
-function loadImgs(){
-  [['co2','co2.png'],['h2','h2.png'],['metan','emetan.png']].forEach(([k,src])=>{
-    const img=new Image();img.src=src;IMGS[k]=img;
-  });
-}
-loadImgs();
-
-// 画像でキャラクターを描画（読み込めていない場合は丸でフォールバック）
-function drawChar(key,x,y,r,shadow){
-  x=Math.round(x);y=Math.round(y);
-  const img=IMGS[key];
-  if(shadow){X.shadowColor=shadow;X.shadowBlur=18;}
-  if(img&&img.complete&&img.naturalWidth>0){
-    X.save();
-    X.beginPath();X.arc(x,y,r,0,Math.PI*2);X.clip();
-    // キャラ本体を円内に収める（少し上寄せで足を自然にトリミング）
-    const s=r*2.3;
-    X.drawImage(img,x-s/2,y-s/2-r*0.08,s,s);
-    X.restore();
-  }else{
-    const fc={co2:'#44445a',h2:'#1144bb',metan:'#229944'};
-    const fe={co2:'worried',h2:'happy',metan:'excited'};
-    drawFace(x,y,r,fc[key]||'#555',fe[key]||'happy');
-  }
-  if(shadow)X.shadowBlur=0;
-}
-
-// キャンバスを画面にフィット
-function resize(){
-  const sw=window.innerWidth,sh=window.innerHeight;
-  const s=Math.min(sw/W,sh/H);
-  const cw=W*s,ch=H*s;
-  C.style.width=cw+'px';C.style.height=ch+'px';
-  C.style.left=((sw-cw)/2)+'px';C.style.top=((sh-ch)/2)+'px';
-}
+function resize(){const sw=window.innerWidth,sh=window.innerHeight,s=Math.min(sw/W,sh/H),cw=W*s,ch=H*s;C.style.width=cw+'px';C.style.height=ch+'px';C.style.left=((sw-cw)/2)+'px';C.style.top=((sh-ch)/2)+'px';}
 resize();window.addEventListener('resize',resize);
+function getPos(e){const t=e.changedTouches?e.changedTouches[0]:e,r=C.getBoundingClientRect();return{x:(t.clientX-r.left)*W/r.width,y:(t.clientY-r.top)*H/r.height};}
+['touchstart','touchmove','touchend','touchcancel'].forEach(ev=>document.addEventListener(ev,e=>e.preventDefault(),{passive:false}));
 
-// タッチ座標をゲーム座標に変換
-function getPos(e){
-  const t=e.changedTouches?e.changedTouches[0]:e;
-  const r=C.getBoundingClientRect();
-  return{x:(t.clientX-r.left)*W/r.width,y:(t.clientY-r.top)*H/r.height};
-}
-// スクロール・ズームを完全に止める
-['touchstart','touchmove','touchend','touchcancel'].forEach(ev=>
-  document.addEventListener(ev,e=>e.preventDefault(),{passive:false})
-);
-
-// ============================================================
-//  ゲーム状態
-// ============================================================
+// ---- State ----
 const ST={TITLE:0,S1:1,S2:2,S3:3,S4:4,END:5};
-let state=ST.TITLE;
-let frame=0;
+let state=ST.TITLE,frame=0;
 let co2G=0,h2G=0,methG=0,gasG=0;
-
-// フェードトランジション（setTimeout不使用）
 let fd={a:0,dir:0,next:-1};
-function startFade(next){if(fd.dir===0){fd.dir=1;fd.next=next;}}
+function startFade(n){if(fd.dir===0){fd.dir=1;fd.next=n;}}
 function updateFade(){
   if(fd.dir===0)return;
   fd.a=Math.min(1,Math.max(0,fd.a+fd.dir*0.055));
-  if(fd.dir===1&&fd.a>=1){
-    fd.dir=-1;
-    state=fd.next;
-    [,initS1,initS2,initS3,initS4,initEnd,initTitle][fd.next+1]?.();
-  }
+  if(fd.dir===1&&fd.a>=1){fd.dir=-1;state=fd.next;[initTitle,initS1,initS2,initS3,initS4,initEnd][fd.next]?.();}
   if(fd.dir===-1&&fd.a<=0){fd.a=0;fd.dir=0;fd.next=-1;}
 }
 
-// ============================================================
-//  パーティクル
-// ============================================================
-const PTS=[];
-function addP(x,y,col,n,spd){
-  for(let i=0;i<n;i++){
-    const a=Math.random()*Math.PI*2,s=spd*(0.4+Math.random()*0.9);
-    PTS.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,r:2+Math.random()*5,col,l:1,d:0.014+Math.random()*0.02});
-  }
+// ---- Screen shake ----
+let shakeAmt=0;
+function triggerShake(n){shakeAmt=n;}
+
+// ---- Audio ----
+let AC=null;
+function ensureAudio(){if(!AC)try{AC=new(window.AudioContext||window.webkitAudioContext)();}catch(e){}}
+function playTone(freq,dur,vol=0.2,type='sine'){
+  if(!AC)return;
+  try{const o=AC.createOscillator(),g=AC.createGain(),t=AC.currentTime;
+    o.connect(g);g.connect(AC.destination);o.type=type;
+    o.frequency.setValueAtTime(freq,t);g.gain.setValueAtTime(vol,t);g.gain.exponentialRampToValueAtTime(0.001,t+dur);
+    o.start(t);o.stop(t+dur);}catch(e){}
 }
+function playSynth(){
+  if(!AC)return;
+  try{const t=AC.currentTime;
+    [[330,0],[550,0.1],[880,0.25],[660,0.45],[1100,0.6],[880,0.8]].forEach(([f,d])=>{
+      const o=AC.createOscillator(),g=AC.createGain();
+      o.connect(g);g.connect(AC.destination);o.type='sine';
+      o.frequency.setValueAtTime(f,t+d);g.gain.setValueAtTime(0.18,t+d);g.gain.exponentialRampToValueAtTime(0.001,t+d+0.35);
+      o.start(t+d);o.stop(t+d+0.35);
+    });}catch(e){}
+}
+function playPop(){playTone(660,0.08,0.1);}
+
+// ---- Particles ----
+const PTS=[];
+function addP(x,y,col,n,spd){for(let i=0;i<n;i++){const a=Math.random()*Math.PI*2,s=spd*(0.4+Math.random()*0.9);PTS.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,r:2+Math.random()*5,col,l:1,d:0.013+Math.random()*0.02});}}
 function burst(x,y,cols,n=40,spd=8){cols.forEach(c=>addP(x,y,c,Math.ceil(n/cols.length),spd));}
 function tickP(){for(let i=PTS.length-1;i>=0;i--){const p=PTS[i];p.x+=p.vx;p.y+=p.vy;p.vy+=0.09;p.l-=p.d;if(p.l<=0)PTS.splice(i,1);}}
 function drawP(){for(const p of PTS){X.globalAlpha=Math.max(0,p.l);X.fillStyle=p.col;X.beginPath();X.arc(p.x,p.y,p.r*Math.max(0.1,p.l),0,Math.PI*2);X.fill();}X.globalAlpha=1;}
 
-// ============================================================
-//  描画ユーティリティ
-// ============================================================
-const STARS=Array.from({length:55},()=>({x:Math.random()*W,y:Math.random()*H,s:Math.random()*2+1,t:Math.random()*6.28}));
-
-function drawBG(){
-  X.fillStyle='#04040e';X.fillRect(0,0,W,H);
-  for(const s of STARS){s.t+=0.012;X.globalAlpha=0.28+Math.sin(s.t)*0.2;X.fillStyle='#fff';X.fillRect(Math.round(s.x),Math.round(s.y),s.s,s.s);}
-  X.globalAlpha=1;
-  // 工場シルエット
-  X.fillStyle='#040c06';X.fillRect(0,H-100,W,100);
-  [[12,H-195,72],[105,H-168,58],[222,H-205,82],[318,H-178,62]].forEach(([bx,by,bw])=>{
-    X.fillStyle='#060f08';X.fillRect(bx,by,bw,H-100-by);
-  });
-  [[30,H-235,12],[56,H-252,10],[244,H-258,13],[278,H-238,10],[344,H-228,11]].forEach(([cx,cy,cw])=>{
-    X.fillStyle='#05090a';X.fillRect(cx,cy,cw,H-100-cy);
-  });
-}
-
-function drawFace(x,y,r,col,expr){
-  x=Math.round(x);y=Math.round(y);
-  X.fillStyle=col;X.beginPath();X.arc(x,y,r,0,Math.PI*2);X.fill();
-  X.strokeStyle='rgba(0,0,0,0.3)';X.lineWidth=2;X.beginPath();X.arc(x,y,r,0,Math.PI*2);X.stroke();
-  const ew=Math.max(3,r*.2),eh=Math.max(4,r*.25);
-  const ex1=x-r*.3,ex2=x+r*.1,ey=y-r*.15;
-  if(expr==='worried'){
-    X.fillStyle='#fff';X.fillRect(ex1,ey,ew,eh);X.fillRect(ex2,ey,ew,eh);
-    X.fillStyle='#111';X.fillRect(ex1+1,ey+3,ew*.5,eh*.5);X.fillRect(ex2+1,ey+3,ew*.5,eh*.5);
-    X.fillStyle='#333';
-    X.save();X.translate(ex1+ew/2,ey-4);X.rotate(0.35);X.fillRect(-ew*.7,0,ew*1.4,2);X.restore();
-    X.save();X.translate(ex2+ew/2,ey-4);X.rotate(-0.35);X.fillRect(-ew*.7,0,ew*1.4,2);X.restore();
-    X.strokeStyle='#111';X.lineWidth=Math.max(1.5,r*.08);
-    X.beginPath();X.arc(x,y+r*.35,r*.2,Math.PI*.1,Math.PI*.9);X.stroke();
-  }else if(expr==='happy'){
-    X.fillStyle='#fff';X.fillRect(ex1,ey,ew,eh);X.fillRect(ex2,ey,ew,eh);
-    X.fillStyle='#111';X.fillRect(ex1+1,ey+3,ew*.5,eh*.5);X.fillRect(ex2+1,ey+3,ew*.5,eh*.5);
-    X.strokeStyle='#111';X.lineWidth=Math.max(1.5,r*.08);
-    X.beginPath();X.arc(x,y+r*.2,r*.22,0,Math.PI);X.stroke();
-  }else if(expr==='excited'){
-    X.fillStyle='#ffee00';
-    [[ex1+ew/2,ey+eh/2],[ex2+ew/2,ey+eh/2]].forEach(([sx,sy])=>{
-      X.beginPath();
-      for(let i=0;i<5;i++){const a=(i/5)*Math.PI*2-Math.PI/2,a2=a+Math.PI/5;i===0?X.moveTo(sx+Math.cos(a)*r*.18,sy+Math.sin(a)*r*.18):X.lineTo(sx+Math.cos(a)*r*.18,sy+Math.sin(a)*r*.18);X.lineTo(sx+Math.cos(a2)*r*.07,sy+Math.sin(a2)*r*.07);}
-      X.closePath();X.fill();
-    });
-    X.fillStyle='#cc2200';X.beginPath();X.arc(x,y+r*.3,r*.2,0,Math.PI);X.fill();
-    X.fillStyle='#fff';X.fillRect(x-r*.14,y+r*.28,r*.07,r*.06);X.fillRect(x+r*.07,y+r*.28,r*.07,r*.06);
+// ---- Speech bubbles ----
+const POPS=[];
+function showPop(x,y,text,col='#333'){POPS.push({x,y:y-8,text,col,life:150,bw:Math.min(230,text.length*10+28)});}
+function tickPops(){for(let i=POPS.length-1;i>=0;i--){POPS[i].life--;if(POPS[i].life<=0)POPS.splice(i,1);}}
+function drawPops(){
+  for(const p of POPS){
+    const a=Math.min(1,p.life/25);X.globalAlpha=a;
+    const bx=Math.max(4,Math.min(W-p.bw-4,p.x-p.bw/2)),by=p.y-40;
+    X.fillStyle='rgba(255,252,230,0.97)';X.fillRect(bx,by,p.bw,26);
+    X.strokeStyle='rgba(0,0,0,0.12)';X.lineWidth=1;X.strokeRect(bx,by,p.bw,26);
+    X.fillStyle='rgba(255,252,230,0.97)';
+    X.beginPath();X.moveTo(p.x-5,by+26);X.lineTo(p.x+5,by+26);X.lineTo(p.x,by+36);X.closePath();X.fill();
+    T(p.text,bx+p.bw/2,by+13,11,p.col);X.globalAlpha=1;
   }
 }
+const CO2_SAY=['このまま捨てられちゃうのかな…','ぼくも役に立ちたいな…','誰か助けて〜','ぼくにも仕事あるかな？'];
+const H2_SAY=['まかせて！','一緒に行こう！','eメタンを作ろう！','君を助けるよ！'];
+const SYNTH_SAY=['✨ eメタン誕生！','✨ エネルギー進化！','✨ CO₂が生まれ変わった！','✨ 新しい燃料完成！'];
 
-function T(s,x,y,sz,col,align='center'){
-  X.save();X.font=`bold ${sz}px sans-serif`;X.textAlign=align;X.textBaseline='middle';
-  X.strokeStyle='rgba(0,0,0,0.95)';X.lineWidth=sz*.22;X.strokeText(s,x,y);
-  X.fillStyle=col;X.fillText(s,x,y);X.restore();
+// ---- Images ----
+const IMGS={};
+['co2','h2','metan'].forEach(k=>{const i=new Image();i.src=k==='metan'?'emetan.png':k+'.png';IMGS[k]=i;});
+function drawChar(key,x,y,r,glow){
+  x=Math.round(x);y=Math.round(y);
+  if(glow){X.shadowColor=glow;X.shadowBlur=20;}
+  const img=IMGS[key];
+  if(img&&img.complete&&img.naturalWidth>0){
+    X.save();X.beginPath();X.arc(x,y,r,0,Math.PI*2);X.clip();
+    const s=r*2.3;X.drawImage(img,x-s/2,y-s/2-r*0.08,s,s);X.restore();
+  }else{
+    const fc={co2:'#44445a',h2:'#1144bb',metan:'#229944'};
+    X.fillStyle=fc[key];X.beginPath();X.arc(x,y,r,0,Math.PI*2);X.fill();
+  }
+  if(glow)X.shadowBlur=0;
 }
 
-function G(label,val,x,y,w,h,col){
-  X.fillStyle='#06060f';X.fillRect(x,y,w,h);
-  X.strokeStyle='#222230';X.lineWidth=1.5;X.strokeRect(x,y,w,h);
-  X.fillStyle=col;X.fillRect(x+2,y+2,(w-4)*Math.min(val/100,1),h-4);
-  T(label,x+5,y+h/2,9,'#ccc','left');
-  T(Math.round(val)+'%',x+w-4,y+h/2,9,'#ccc','right');
-}
+// ---- Stars ----
+const STARS=Array.from({length:55},()=>({x:Math.random()*W,y:Math.random()*H,s:Math.random()*2+1,t:Math.random()*6.28}));
 
+// ---- Text ----
+function T(s,x,y,sz,col,align='center'){X.save();X.font=`bold ${sz}px sans-serif`;X.textAlign=align;X.textBaseline='middle';X.strokeStyle='rgba(0,0,0,0.95)';X.lineWidth=sz*.22;X.strokeText(s,x,y);X.fillStyle=col;X.fillText(s,x,y);X.restore();}
+function G(label,val,x,y,w,h,col){X.fillStyle='#06060f';X.fillRect(x,y,w,h);X.strokeStyle='#1a1a2a';X.lineWidth=1.5;X.strokeRect(x,y,w,h);X.fillStyle=col;X.fillRect(x+2,y+2,(w-4)*Math.min(val/100,1),h-4);T(label,x+5,y+h/2,9,'#ccc','left');T(Math.round(val)+'%',x+w-4,y+h/2,9,'#ccc','right');}
 function drawHUD(){
   const gw=(W-24)/3;
-  G('CO₂回収',co2G,8,H-86,gw,20,'#778899');
+  G('CO₂レスキュー',co2G,8,H-86,gw,20,'#778899');
   G('水素回収',h2G,8+gw+4,H-86,gw,20,'#3366cc');
   G('eメタン',methG,8+gw*2+8,H-86,gw,20,'#339966');
   if(state===ST.S4||state===ST.END)G('出荷量',gasG,8,H-62,W-16,20,'#cc9900');
 }
+function msgBar(msg,a=1){X.globalAlpha=a;X.fillStyle='rgba(0,5,16,.9)';X.fillRect(8,H-131,W-16,30);X.strokeStyle='rgba(80,180,80,.3)';X.lineWidth=1;X.strokeRect(8,H-131,W-16,30);T(msg,W/2,H-117,12,'#ffff88');X.globalAlpha=1;}
+function stageLabel(name){X.globalAlpha=0.055;X.font='bold 30px sans-serif';X.textAlign='center';X.textBaseline='middle';X.fillStyle='#fff';X.fillText(name,W/2,H/2);X.globalAlpha=1;}
 
-function msgBar(msg,alpha=1){
-  X.globalAlpha=alpha;
-  X.fillStyle='rgba(0,5,16,.9)';X.fillRect(8,H-131,W-16,30);
-  X.strokeStyle='rgba(80,180,80,.3)';X.lineWidth=1;X.strokeRect(8,H-131,W-16,30);
-  T(msg,W/2,H-117,12,'#ffff88');
+// ---- Backgrounds ----
+function drawBG(tint){
+  X.fillStyle=tint||'#04040e';X.fillRect(0,0,W,H);
+  for(const s of STARS){s.t+=0.012;X.globalAlpha=0.28+Math.sin(s.t)*0.2;X.fillStyle='#fff';X.fillRect(Math.round(s.x),Math.round(s.y),s.s,s.s);}
   X.globalAlpha=1;
+  X.fillStyle='#040c06';X.fillRect(0,H-100,W,100);
+  [[12,H-195,72],[105,H-168,58],[222,H-205,82],[318,H-178,62]].forEach(([bx,by,bw])=>{X.fillStyle='#060f08';X.fillRect(bx,by,bw,H-100-by);});
+  [[30,H-235,12],[56,H-252,10],[244,H-258,13],[278,H-238,10],[344,H-228,11]].forEach(([cx,cy,cw])=>{X.fillStyle='#05090a';X.fillRect(cx,cy,cw,H-100-cy);});
+}
+function drawCityBG(){
+  X.fillStyle='#02030f';X.fillRect(0,0,W,H);
+  for(const s of STARS){s.t+=0.01;X.globalAlpha=0.35+Math.sin(s.t)*0.25;X.fillStyle='#ddeeff';X.fillRect(Math.round(s.x),Math.round(s.y/2),s.s,s.s);}
+  X.globalAlpha=1;
+  [[0,H-160,45],[50,H-225,38],[90,H-182,52],[145,H-255,42],[192,H-198,32],[232,H-235,56],[292,H-178,42],[338,H-215,52]].forEach(([bx,by,bw])=>{
+    X.fillStyle='#070820';X.fillRect(bx,by,bw,H-by);
+    for(let wy=by+10;wy<H-30;wy+=18)for(let wx=bx+5;wx<bx+bw-5;wx+=12)
+      if(Math.sin(wx*7.3+wy*3.1)>0.15){X.fillStyle=`rgba(255,235,100,${0.35+Math.sin(frame*.02+wx)*.2})`;X.fillRect(wx,wy,7,9);}
+  });
+  X.fillStyle='#070820';X.fillRect(0,H-55,W,55);
+}
+
+// ============================================================
+//  BOSS: モッタイナイ大王
+// ============================================================
+const BOSS_SAY=['CO₂なんて捨ててしまえ！','再利用なんて面倒だ！','全部燃やしてしまえ！'];
+let boss={};
+function initBoss(){boss={x:W/2,y:H*.3,r:34,vx:0.8,vy:0.4,hp:5,maxHP:5,alive:true,visible:false,showT:0,nextShow:200,talkT:0,defeated:false,defeatT:0};}
+function updateBoss(blobs){
+  if(boss.defeated){boss.defeatT++;if(boss.defeatT>80)boss.alive=false;return;}
+  boss.showT++;
+  if(!boss.visible){if(boss.showT>=boss.nextShow){boss.visible=true;boss.showT=0;boss.x=W*.2+Math.random()*W*.6;boss.y=85;boss.talkT=50;}return;}
+  let target=null,td=99999;
+  for(const b of blobs){if(!b.alive)continue;const dx=b.x-boss.x,dy=b.y-boss.y,d=dx*dx+dy*dy;if(d<td){td=d;target=b;}}
+  if(target){const dx=target.x-boss.x,dy=target.y-boss.y,d=Math.sqrt(dx*dx+dy*dy)||1;boss.vx+=dx/d*0.1;boss.vy+=dy/d*0.1;}
+  boss.vx=Math.max(-2.5,Math.min(2.5,boss.vx));boss.vy=Math.max(-2,Math.min(2.5,boss.vy));
+  boss.x+=boss.vx;boss.y+=boss.vy;
+  boss.x=Math.max(boss.r,Math.min(W-boss.r,boss.x));boss.y=Math.max(70,Math.min(H-200,boss.y));
+  for(const b of blobs){if(!b.alive)continue;const dx=b.x-boss.x,dy=b.y-boss.y;if(dx*dx+dy*dy<(boss.r+b.r)*(boss.r+b.r)){b.alive=false;burst(b.x,b.y,['#555','#333'],8,3);}}
+  boss.talkT--;if(boss.talkT<=0){showPop(boss.x,boss.y-boss.r,BOSS_SAY[Math.floor(Math.random()*3)],'#880000');boss.talkT=200;}
+  boss.showT++;if(boss.showT>380){boss.visible=false;boss.showT=0;boss.nextShow=160;}
+}
+function tapBoss(x,y){
+  if(!boss.visible||boss.defeated)return false;
+  const dx=x-boss.x,dy=y-boss.y;
+  if(dx*dx+dy*dy>(boss.r+18)*(boss.r+18))return false;
+  boss.hp--;playPop();burst(boss.x,boss.y,['#ff4444','#ff8800'],12,4);
+  showPop(boss.x,boss.y-boss.r-10,boss.hp>0?'痛い！':'CO₂も資源だったのか…','#cc0000');
+  if(boss.hp<=0){boss.defeated=true;burst(boss.x,boss.y,['#44ff88','#ffff00','#ff8800'],50,8);}
+  return true;
+}
+function drawBoss(){
+  if(!boss.alive||!boss.visible)return;
+  X.save();
+  if(boss.defeated){X.globalAlpha=Math.max(0,1-boss.defeatT/35);X.translate(boss.x,boss.y);X.scale(1+boss.defeatT*.04,1+boss.defeatT*.04);X.translate(-boss.x,-boss.y);}
+  // smoke body
+  for(let i=0;i<5;i++){const a=(i/5)*Math.PI*2+frame*.02,px=boss.x+Math.cos(a)*boss.r*.45,py=boss.y+Math.sin(a)*boss.r*.38;X.fillStyle='#4a4a5a';X.beginPath();X.arc(px,py,boss.r*.65,0,Math.PI*2);X.fill();}
+  X.fillStyle='#5a5a6a';X.beginPath();X.arc(boss.x,boss.y,boss.r,0,Math.PI*2);X.fill();
+  // hp bar
+  const bw=boss.r*2.5;X.fillStyle='#333';X.fillRect(boss.x-bw/2,boss.y-boss.r-14,bw,8);X.fillStyle='#ff3333';X.fillRect(boss.x-bw/2,boss.y-boss.r-14,bw*(boss.hp/boss.maxHP),8);
+  // eyes
+  const er=boss.r*.18;
+  [[boss.x-boss.r*.28,boss.y-boss.r*.1],[boss.x+boss.r*.1,boss.y-boss.r*.1]].forEach(([ex,ey])=>{
+    X.fillStyle='#ff2200';X.beginPath();X.arc(ex,ey,er,0,Math.PI*2);X.fill();
+    X.fillStyle='#000';X.beginPath();X.arc(ex,ey,er*.45,0,Math.PI*2);X.fill();
+  });
+  X.strokeStyle='#660000';X.lineWidth=Math.max(1.5,boss.r*.08);X.beginPath();X.arc(boss.x,boss.y+boss.r*.32,boss.r*.2,Math.PI*.1,Math.PI*.9,true);X.stroke();
+  T('モッタイナイ大王',boss.x,boss.y+boss.r+14,10,'#ff8888');
+  X.restore();
 }
 
 // ============================================================
@@ -193,65 +196,49 @@ function msgBar(msg,alpha=1){
 // ============================================================
 let titleBubs=[];
 function initTitle(){
-  titleBubs=Array.from({length:8},()=>({
-    x:Math.random()*W,y:Math.random()*H,
-    r:14+Math.random()*18,vx:(Math.random()-.5)*.7,vy:(Math.random()-.5)*.7,
-    w:Math.random()*6.28,type:Math.random()<.5?'co2':'h2'
-  }));
-  PTS.length=0;co2G=0;h2G=0;methG=0;gasG=0;
+  titleBubs=Array.from({length:8},()=>({x:Math.random()*W,y:Math.random()*H,r:14+Math.random()*18,vx:(Math.random()-.5)*.7,vy:(Math.random()-.5)*.7,w:Math.random()*6.28,type:Math.random()<.5?'co2':'h2'}));
+  PTS.length=0;POPS.length=0;co2G=0;h2G=0;methG=0;gasG=0;
 }
-
-function updateTitle(){
-  for(const b of titleBubs){b.w+=.014;b.x+=b.vx+Math.sin(b.w)*.3;b.y+=b.vy;if(b.x<-b.r)b.x=W+b.r;if(b.x>W+b.r)b.x=-b.r;if(b.y<-b.r)b.y=H+b.r;if(b.y>H+b.r)b.y=-b.r;}
-  tickP();
-}
-
+function updateTitle(){for(const b of titleBubs){b.w+=.014;b.x+=b.vx+Math.sin(b.w)*.3;b.y+=b.vy;if(b.x<-b.r)b.x=W+b.r;if(b.x>W+b.r)b.x=-b.r;if(b.y<-b.r)b.y=H+b.r;if(b.y>H+b.r)b.y=-b.r;}tickP();}
 function drawTitle(){
   drawBG();
-  X.globalAlpha=0.18;
-  for(const b of titleBubs)drawChar(b.type==='co2'?'co2':'h2',b.x,b.y,b.r);
-  X.globalAlpha=1;
+  X.globalAlpha=0.18;for(const b of titleBubs)drawChar(b.type,b.x,b.y,b.r);X.globalAlpha=1;
   drawP();
-  // タイトルボックス
   const p=Math.sin(frame*.04)*.02+1;
-  X.save();X.translate(W/2,H*.18);X.scale(p,p);
-  X.fillStyle='rgba(0,4,14,.94)';X.fillRect(-168,-38,336,78);
-  X.strokeStyle='#44cc88';X.lineWidth=2.5;X.strokeRect(-168,-38,336,78);
-  T('eメタンファクトリー',0,-16,20,'#44ff88');
-  T('〜 CO₂ を救え！ 〜',0,12,15,'#ffcc44');
-  X.restore();
-  // キャラ紹介
-  const cy=H*.46;
-  drawChar('co2',W*.16,cy,26);T('CO₂',W*.16,cy+36,12,'#aaa');T('捨てられる…',W*.16,cy+53,9,'#888');
-  T('＋',W*.42,cy,22,'#ffee66');
-  drawChar('h2',W*.66,cy,24);T('H₂',W*.66,cy+36,12,'#88aaff');T('助けにいく！',W*.66,cy+53,9,'#5577bb');
-  T('↓ 合体！',W/2,cy+78,15,'#ffee44');
-  drawChar('metan',W/2,cy+130,30,'#44ff88');
-  T('eメタン誕生！',W/2,cy+172,14,'#66ffaa');T('→ 都市ガスへ',W/2,cy+190,10,'#449966');
-  // スタートボタン
+  X.save();X.translate(W/2,H*.15);X.scale(p,p);
+  X.fillStyle='rgba(0,4,14,.94)';X.fillRect(-168,-44,336,90);X.strokeStyle='#44cc88';X.lineWidth=2.5;X.strokeRect(-168,-44,336,90);
+  T('eメタンファクトリー Ver.2',0,-18,18,'#44ff88');T('〜 CO₂を救え！ 〜',0,12,15,'#ffcc44');X.restore();
+  const cy=H*.42;
+  drawChar('co2',W*.14,cy,24);T('CO₂',W*.14,cy+33,10,'#aaa');T('捨てられる…',W*.14,cy+49,9,'#888');
+  T('→',W*.32,cy,16,'#ffee66');
+  drawChar('h2',W*.48,cy,22);T('H₂',W*.48,cy+33,10,'#88aaff');T('助けに行く！',W*.48,cy+49,9,'#5577bb');
+  T('→',W*.66,cy,16,'#ffee66');
+  drawChar('metan',W*.82,cy,22,'#44ff88');T('eメタン',W*.82,cy+33,10,'#66ffaa');T('誕生！',W*.82,cy+49,9,'#449966');
+  T('↓ みんなの生活を支える',W/2,cy+70,12,'#ffcc44');
+  const sy=cy+92;
+  X.fillStyle='rgba(0,8,4,.82)';X.fillRect(12,sy,W-24,108);X.strokeStyle='rgba(68,200,100,.2)';X.lineWidth=1;X.strokeRect(12,sy,W-24,108);
+  [['① CO₂救出','南部浄化センター','#88ffcc'],
+   ['② 水素回収','消化タンク','#88aaff'],
+   ['③ eメタン合成','知多LNG共同基地','#44ff88'],
+   ['④ 都市ガス出荷','都市ガス配管','#ffcc44']].forEach(([s,loc,c],i)=>{
+    T(s,22,sy+15+i*25,11,c,'left');T(loc,W-18,sy+15+i*25,9,'#556677','right');
+  });
   X.globalAlpha=.6+Math.sin(frame*.09)*.35;
-  X.fillStyle='#112a1a';X.fillRect(W/2-108,H-106,216,50);
-  X.strokeStyle='#44ff88';X.lineWidth=2.5;X.strokeRect(W/2-108,H-106,216,50);
-  T('タップしてスタート！',W/2,H-82,17,'#88ffcc');
-  X.globalAlpha=1;
+  X.fillStyle='#112a1a';X.fillRect(W/2-110,H-105,220,50);X.strokeStyle='#44ff88';X.lineWidth=2.5;X.strokeRect(W/2-110,H-105,220,50);
+  T('タップしてスタート！',W/2,H-81,17,'#88ffcc');X.globalAlpha=1;
   T('知多市 南部浄化センター eメタン事業',W/2,H-40,9,'#334433');
 }
 
 // ============================================================
-//  STAGE 1 ― CO₂かいしゅう
+//  STAGE 1 ― CO₂救出 (南部浄化センター)
 // ============================================================
 let s1={};
 function initS1(){
-  s1={blobs:[],caught:0,need:20,timer:0,doneT:0,done:false,
-      combo:0,comboT:0,msg:'CO₂をタップしてつかまえよう！',msgT:160};
-  PTS.length=0;
-  for(let i=0;i<9;i++)spawnCO2();
+  s1={blobs:[],caught:0,need:20,timer:0,doneT:0,done:false,combo:0,comboT:0,msg:'CO₂くんを救出しよう！ タップしてつかまえよう！',msgT:160};
+  PTS.length=0;POPS.length=0;initBoss();
+  for(let i=0;i<8;i++)spawnCO2();
 }
-function spawnCO2(){
-  const r=18+Math.random()*15,a=Math.random()*Math.PI*2,sp=.7+Math.random()*1.1;
-  s1.blobs.push({x:r+Math.random()*(W-r*2),y:68+Math.random()*(H-262),
-    r,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,w:Math.random()*6.28,ws:.02+Math.random()*.02,alive:true,scale:1});
-}
+function spawnCO2(){const r=18+Math.random()*15,a=Math.random()*Math.PI*2,sp=.7+Math.random()*1.1;s1.blobs.push({x:r+Math.random()*(W-r*2),y:68+Math.random()*(H-262),r,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,w:Math.random()*6.28,ws:.02+Math.random()*.02,alive:true,scale:1});}
 function updateS1(){
   s1.timer++;s1.msgT=Math.max(0,s1.msgT-1);s1.comboT=Math.max(0,s1.comboT-1);
   if(s1.timer%88===0&&s1.blobs.filter(b=>b.alive).length<11)spawnCO2();
@@ -262,67 +249,72 @@ function updateS1(){
     if(b.y<65){b.vy=Math.abs(b.vy);b.y=65;}if(b.y>H-198){b.vy=-Math.abs(b.vy);b.y=H-198;}
   }
   for(let i=s1.blobs.length-1;i>=0;i--)if(!s1.blobs[i].alive&&s1.blobs[i].scale<=0)s1.blobs.splice(i,1);
-  tickP();
+  updateBoss(s1.blobs);
+  if(boss.defeated&&boss.defeatT===1){for(let i=0;i<4;i++)spawnCO2();showPop(W/2,H*.4,'ボス撃退！ CO₂くんが解放された！','#22cc66');}
+  tickP();tickPops();
   co2G=Math.min(100,s1.caught/s1.need*100);
-  if(s1.caught>=s1.need&&!s1.done){s1.done=true;s1.msg='CO₂回収完了！次は水素を集めよう！';s1.msgT=9999;}
+  if(s1.caught>=s1.need&&!s1.done){s1.done=true;s1.msg='CO₂救出完了！ 次は水素を集めよう！';s1.msgT=9999;}
   if(s1.done){s1.doneT++;if(s1.doneT===110)startFade(ST.S2);}
 }
 function tapS1(x,y){
   if(s1.done)return;
+  if(tapBoss(x,y))return;
   for(const b of s1.blobs){
     if(!b.alive)continue;
     const dx=x-b.x,dy=y-b.y;
     if(dx*dx+dy*dy<(b.r+14)*(b.r+14)){
       b.alive=false;s1.caught++;
-      s1.comboT>0?s1.combo++:( s1.combo=1);
-      s1.comboT=55;
+      s1.comboT>0?s1.combo++:(s1.combo=1);s1.comboT=55;
       burst(b.x,b.y,['#777','#aaa','#44ff88'],12,4);
+      showPop(b.x,b.y,CO2_SAY[Math.floor(Math.random()*CO2_SAY.length)]);
+      playPop();
       if(s1.combo>=3){burst(b.x,b.y,['#ffff00','#ff8800'],18,7);s1.msg=s1.combo+'コンボ！すごい！';s1.msgT=65;}
       break;
     }
   }
 }
 function drawS1(){
-  drawBG();
+  drawBG();stageLabel('南部浄化センター');
   for(const b of s1.blobs){
     if(!b.alive){X.save();X.globalAlpha=b.scale;X.translate(b.x,b.y);X.scale(b.scale,b.scale);X.translate(-b.x,-b.y);}
     drawChar('co2',b.x,b.y,b.r);
-    T('CO₂',b.x,b.y+b.r+12,Math.round(b.r*.52),'#aaa');
     if(!b.alive)X.restore();
   }
-  drawP();
-  if(s1.combo>=2&&s1.comboT>0){X.globalAlpha=Math.min(1,s1.comboT/18);T(s1.combo+' COMBO!',W/2,H/2-30,28,'#ffcc00');X.globalAlpha=1;}
+  drawBoss();drawP();drawPops();
+  if(s1.combo>=2&&s1.comboT>0){X.globalAlpha=Math.min(1,s1.comboT/18);T(s1.combo+' COMBO!',W/2,H/2-40,28,'#ffcc00');X.globalAlpha=1;}
   drawHUD();
-  T('STAGE 1 ― CO₂かいしゅう',W/2,34,15,'#88ffcc');
-  T('残り '+Math.max(0,s1.need-s1.caught)+' 個',W/2,57,12,'#557766');
+  T('STAGE 1 ― CO₂救出',W/2,34,15,'#88ffcc');
+  T('残り '+Math.max(0,s1.need-s1.caught)+' 体',W/2,57,12,'#557766');
+  if(boss.visible&&!boss.defeated)T('★ モッタイナイ大王を5回タップ！',W/2,H-150,11,'#ff8888');
   if(s1.msgT>0)msgBar(s1.msg,Math.min(1,s1.msgT/30));
 }
 
 // ============================================================
-//  STAGE 2 ― 水素かいしゅう
+//  STAGE 2 ― 水素かいしゅう (消化タンク)
 // ============================================================
 let s2={};
 function initS2(){
-  s2={pl:{x:W/2,y:H*.7,tx:W/2,ty:H*.7,inv:0},items:[],poisons:[],
-      caught:0,need:25,timer:0,doneT:0,done:false,msg:'H₂を集めよう！ ☠毒ガスに注意！',msgT:160};
-  PTS.length=0;
+  s2={pl:{x:W/2,y:H*.7,tx:W/2,ty:H*.7,inv:0},items:[],poisons:[],caught:0,need:25,timer:0,doneT:0,done:false,msg:'H₂くんを集めよう！ ☠毒ガスに注意！',msgT:160};
+  PTS.length=0;POPS.length=0;
   for(let i=0;i<4;i++){const a=Math.random()*Math.PI*2;s2.poisons.push({x:55+Math.random()*(W-110),y:85+Math.random()*(H*.5),r:15+Math.random()*8,vx:Math.cos(a)*(1+Math.random()*.7),vy:Math.sin(a)*(1+Math.random()*.7)});}
 }
 function updateS2(){
   s2.timer++;s2.msgT=Math.max(0,s2.msgT-1);
   const rate=Math.max(35,75-s2.timer/55);
   if(s2.timer%Math.round(rate)===0)s2.items.push({x:25+Math.random()*(W-50),y:-25,r:13+Math.random()*8,vy:1.3+Math.random()*1.4,w:Math.random()*6.28,alive:true,scale:1});
-  const pl=s2.pl;
-  const dx=pl.tx-pl.x,dy=pl.ty-pl.y,d=Math.sqrt(dx*dx+dy*dy);
+  const pl=s2.pl,dx=pl.tx-pl.x,dy=pl.ty-pl.y,d=Math.sqrt(dx*dx+dy*dy);
   if(d>3){pl.x+=dx*.15;pl.y+=dy*.15;}
   pl.x=Math.max(28,Math.min(W-28,pl.x));pl.y=Math.max(80,Math.min(H-165,pl.y));
   if(pl.inv>0)pl.inv--;
   for(const h of s2.items){
     if(!h.alive){h.scale=Math.max(0,h.scale-.1);continue;}
-    h.w+=.04;h.y+=h.vy;h.x+=Math.sin(h.w)*.7;
-    h.x=Math.max(h.r,Math.min(W-h.r,h.x));
+    h.w+=.04;h.y+=h.vy;h.x+=Math.sin(h.w)*.7;h.x=Math.max(h.r,Math.min(W-h.r,h.x));
     const ddx=pl.x-h.x,ddy=pl.y-h.y;
-    if(ddx*ddx+ddy*ddy<(27+h.r)*(27+h.r)){h.alive=false;s2.caught++;h2G=Math.min(100,s2.caught/s2.need*100);burst(h.x,h.y,['#4488ff','#88ccff'],12,4);}
+    if(ddx*ddx+ddy*ddy<(27+h.r)*(27+h.r)){
+      h.alive=false;s2.caught++;h2G=Math.min(100,s2.caught/s2.need*100);
+      burst(h.x,h.y,['#4488ff','#88ccff'],12,4);
+      showPop(pl.x,pl.y,H2_SAY[Math.floor(Math.random()*H2_SAY.length)],'#2255cc');playPop();
+    }
   }
   for(let i=s2.items.length-1;i>=0;i--){const h=s2.items[i];if(h.y>H-80||(!h.alive&&h.scale<=0))s2.items.splice(i,1);}
   for(const p of s2.poisons){
@@ -331,123 +323,112 @@ function updateS2(){
     if(p.y<70){p.vy=Math.abs(p.vy);p.y=70;}if(p.y>H-198){p.vy=-Math.abs(p.vy);p.y=H-198;}
     if(pl.inv<=0){const ddx=pl.x-p.x,ddy=pl.y-p.y;if(ddx*ddx+ddy*ddy<(27+p.r)*(27+p.r)){pl.inv=72;burst(pl.x,pl.y,['#ff4444','#ff8888'],14,3);s2.msg='あぶない！ 毒ガスにぶつかった！';s2.msgT=80;}}
   }
-  tickP();h2G=Math.min(100,s2.caught/s2.need*100);
+  tickP();tickPops();h2G=Math.min(100,s2.caught/s2.need*100);
   if(s2.caught>=s2.need&&!s2.done){s2.done=true;s2.msg='水素回収完了！いよいよ合成だ！';s2.msgT=9999;}
   if(s2.done){s2.doneT++;if(s2.doneT===110)startFade(ST.S3);}
 }
 function tapS2(x,y){s2.pl.tx=x;s2.pl.ty=Math.min(y,H-165);}
 function drawS2(){
-  drawBG();
+  drawBG('#04060e');stageLabel('消化タンク');
   for(const h of s2.items){
     if(!h.alive){X.save();X.globalAlpha=h.scale;X.translate(h.x,h.y);X.scale(h.scale,h.scale);X.translate(-h.x,-h.y);}
     drawChar('h2',h.x,h.y,h.r);T('H₂',h.x,h.y+h.r+11,Math.round(h.r*.55),'#88aaff');
     if(!h.alive)X.restore();
   }
-  for(const p of s2.poisons){
-    X.fillStyle='#4a0000';X.beginPath();X.arc(p.x,p.y,p.r,0,Math.PI*2);X.fill();
-    X.strokeStyle='#cc2200';X.lineWidth=2;X.beginPath();X.arc(p.x,p.y,p.r,0,Math.PI*2);X.stroke();
-    T('☠',p.x,p.y,p.r,'#ff4444');
-  }
+  for(const p of s2.poisons){X.fillStyle='#4a0000';X.beginPath();X.arc(p.x,p.y,p.r,0,Math.PI*2);X.fill();X.strokeStyle='#cc2200';X.lineWidth=2;X.beginPath();X.arc(p.x,p.y,p.r,0,Math.PI*2);X.stroke();T('☠',p.x,p.y,p.r,'#ff4444');}
   const pl=s2.pl;
-  if(pl.inv<=0||Math.floor(pl.inv/5)%2===0){
-    drawChar('h2',pl.x,pl.y,25,'#4488ff');
-    T('H₂(あなた)',pl.x,pl.y+38,9,'#7799cc');
-  }
-  drawP();drawHUD();
+  if(pl.inv<=0||Math.floor(pl.inv/5)%2===0){drawChar('h2',pl.x,pl.y,25,'#4488ff');T('H₂(あなた)',pl.x,pl.y+38,9,'#7799cc');}
+  drawP();drawPops();drawHUD();
   T('STAGE 2 ― 水素かいしゅう',W/2,34,15,'#88ccff');
   T('残り '+Math.max(0,s2.need-s2.caught)+' 個',W/2,57,12,'#446688');
   if(s2.msgT>0)msgBar(s2.msg,Math.min(1,s2.msgT/30));
 }
 
 // ============================================================
-//  STAGE 3 ― メタネーション（インタラクティブ）
+//  STAGE 3 ― メタネーション MEGA (知多LNG共同基地)
 // ============================================================
-let s3={};
+let s3={},s3txt='',s3flash=0;
 function initS3(){
-  s3={phase:0,timer:0,doneT:0,done:false,
-      orbitR:140,h2Angs:[0,Math.PI/2,Math.PI,Math.PI*1.5],
-      flash:0,meth:{r:0,pulse:0},
-      msg:'CO₂をタップして合体させよう！',msgT:220};
-  methG=100;PTS.length=0;
+  s3={phase:0,timer:0,doneT:0,done:false,orbitR:140,h2Angs:[0,Math.PI/2,Math.PI,Math.PI*1.5],meth:{r:0,pulse:0},msg:'CO₂をタップして合体させよう！',msgT:220};
+  methG=100;PTS.length=0;POPS.length=0;s3flash=0;shakeAmt=0;
+  s3txt=SYNTH_SAY[Math.floor(Math.random()*SYNTH_SAY.length)];
 }
 function updateS3(){
   s3.timer++;s3.msgT=Math.max(0,s3.msgT-1);
   if(s3.phase===0){
     s3.h2Angs=s3.h2Angs.map(a=>a+.025);
   }else if(s3.phase===1){
-    s3.orbitR=Math.max(0,s3.orbitR-4.5);
-    s3.flash=Math.min(1.5,s3.flash+.055);
+    s3.orbitR=Math.max(0,s3.orbitR-4.2);
+    s3flash=Math.min(1.8,s3flash+.06);
     if(s3.orbitR<=0){
       s3.phase=2;s3.timer=0;
-      burst(W/2,H*.37,['#44ff88','#ffff00','#88ffcc','#ff8844','#fff'],80,12);
-      s3.msg='✨ eメタン誕生！！ ✨';s3.msgT=9999;
+      triggerShake(22);playSynth();
+      burst(W/2,H*.37,['#44ff88','#ffff00','#88ffcc','#ff8844','#fff','#ffcc00'],100,14);
+      s3.msg=s3txt;s3.msgT=9999;
     }
   }else if(s3.phase===2){
-    s3.flash=Math.max(0,s3.flash-.022);
-    s3.meth.r=Math.min(52,s3.meth.r+2.5);
-    s3.meth.pulse+=.06;
-    if(s3.timer%22===0)addP(W/2,H*.37-60,'#44ff88',3,2);
+    s3flash=Math.max(0,s3flash-.016);
+    if(shakeAmt>0.5){shakeAmt*=0.85;}else{shakeAmt=0;}
+    s3.meth.r=Math.min(52,s3.meth.r+2.5);s3.meth.pulse+=.06;
+    if(s3.timer%18===0)addP(W/2,H*.37-65,'#44ff88',3,2);
   }
-  tickP();
+  tickP();tickPops();
   if(s3.phase===2&&s3.meth.r>=52&&!s3.done){s3.done=true;}
   if(s3.done){s3.doneT++;if(s3.doneT===130)startFade(ST.S4);}
 }
 function tapS3(x,y){
   if(s3.phase!==0)return;
   const dx=x-W/2,dy=y-H*.37;
-  if(dx*dx+dy*dy<75*75){
-    s3.phase=1;s3.msg='はんのう開始！！';s3.msgT=110;
-    burst(W/2,H*.37,['#ffff44','#fff'],15,5);
-  }
+  if(dx*dx+dy*dy<78*78){s3.phase=1;s3.msg='はんのう開始！！';s3.msgT=80;burst(W/2,H*.37,['#ffff44','#fff'],15,5);ensureAudio();}
 }
 function drawS3(){
-  drawBG();
-  if(s3.flash>0){X.fillStyle=`rgba(200,255,220,${Math.min(.88,s3.flash*.8)})`;X.fillRect(0,0,W,H);}
+  drawBG('#050420');stageLabel('知多LNG共同基地');
+  // flash
+  if(s3flash>0){X.fillStyle=`rgba(220,255,220,${Math.min(.9,s3flash*.72)})`;X.fillRect(0,0,W,H);}
   T('STAGE 3 ― メタネーション！',W/2,34,15,'#ffcc44');
   const cx=W/2,cy=H*.37;
-  if(s3.phase<2||s3.flash>.3){
-    drawChar('co2',cx,cy,40);T('CO₂',cx,cy+55,14,'#999');
+  // shakeable layer
+  X.save();
+  if(shakeAmt>0.5)X.translate((Math.random()-.5)*shakeAmt,(Math.random()-.5)*shakeAmt);
+  if(s3.phase<2||s3flash>.35){
+    drawChar('co2',cx,cy,40);T('CO₂',cx,cy+56,14,'#999');
     if(s3.phase===0){
       const pr=Math.sin(frame*.08)*6;
-      X.strokeStyle=`rgba(255,200,0,${.45+Math.sin(frame*.08)*.4})`;
-      X.lineWidth=3;X.setLineDash([8,6]);
-      X.beginPath();X.arc(cx,cy,52+pr,0,Math.PI*2);X.stroke();X.setLineDash([]);
-      T('タップ！',cx,cy,15,'#ffcc00');
+      X.strokeStyle=`rgba(255,210,0,${.45+Math.sin(frame*.08)*.38})`;X.lineWidth=3;X.setLineDash([8,6]);
+      X.beginPath();X.arc(cx,cy,53+pr,0,Math.PI*2);X.stroke();X.setLineDash([]);
+      T('タップ！',cx,cy,16,'#ffcc00');
     }
   }
   if(s3.phase<=1){
-    for(const a of s3.h2Angs){
-      const hx=cx+Math.cos(a)*s3.orbitR,hy=cy+Math.sin(a)*s3.orbitR*.8;
-      drawChar('h2',hx,hy,20);T('H₂',hx,hy+28,10,'#88aaff');
-    }
-    if(s3.phase===0){
-      X.strokeStyle='rgba(80,100,255,.15)';X.lineWidth=1;X.setLineDash([4,5]);
-      X.beginPath();X.ellipse(cx,cy,s3.orbitR,s3.orbitR*.8,0,0,Math.PI*2);X.stroke();X.setLineDash([]);
-    }
+    for(const a of s3.h2Angs){const hx=cx+Math.cos(a)*s3.orbitR,hy=cy+Math.sin(a)*s3.orbitR*.8;drawChar('h2',hx,hy,20);T('H₂',hx,hy+28,10,'#88aaff');}
+    if(s3.phase===0){X.strokeStyle='rgba(80,100,255,.15)';X.lineWidth=1;X.setLineDash([4,5]);X.beginPath();X.ellipse(cx,cy,s3.orbitR,s3.orbitR*.8,0,0,Math.PI*2);X.stroke();X.setLineDash([]);}
   }
   if(s3.meth.r>0){
-    const pr=Math.sin(s3.meth.pulse)*4;
+    const pr=Math.sin(s3.meth.pulse)*5;
     drawChar('metan',cx,cy,s3.meth.r+pr,'#44ff88');
-    T('eメタン！',cx,cy+s3.meth.r+22,15,'#66ffaa');
-    for(let i=0;i<6;i++){const sa=(i/6)*Math.PI*2+frame*.06,sr=s3.meth.r+26+Math.sin(frame*.12+i)*5;T('★',cx+Math.cos(sa)*sr,cy+Math.sin(sa)*sr,13,'#ffee44');}
+    T('eメタン！',cx,cy+s3.meth.r+26,16,'#66ffaa');
+    for(let i=0;i<8;i++){const sa=(i/8)*Math.PI*2+frame*.06,sr=s3.meth.r+30+Math.sin(frame*.12+i)*6;T('★',cx+Math.cos(sa)*sr,cy+Math.sin(sa)*sr,14,'#ffee44');}
+    if(s3.done){
+      const sc=1+Math.sin(frame*.08)*.06;
+      X.save();X.translate(cx,cy-s3.meth.r-62);X.scale(sc,sc);
+      X.fillStyle='rgba(0,20,10,.92)';X.fillRect(-132,-22,264,44);X.strokeStyle='#44ff88';X.lineWidth=2;X.strokeRect(-132,-22,264,44);
+      T(s3txt,0,0,16,'#ffff44');X.restore();
+    }
   }
-  drawP();drawHUD();
+  X.restore();
+  drawP();drawPops();drawHUD();
   if(s3.msgT>0)msgBar(s3.msg,Math.min(1,s3.msgT/30));
 }
 
 // ============================================================
-//  STAGE 4 ― 都市ガスしゅっか
+//  STAGE 4 ― 都市ガス出荷 (都市ガス配管)
 // ============================================================
 let s4={};
-const PIPY=H-160;
-function initS4(){
-  s4={bubs:[],delivered:0,need:15,timer:0,doneT:0,done:false,msg:'eメタンをタップして下のガス管へ送り込め！',msgT:200};
-  PTS.length=0;
-}
+const PIPY=H-162;
+function initS4(){s4={bubs:[],delivered:0,need:15,timer:0,doneT:0,done:false,msg:'eメタンをタップしてガス管へ送り込め！',msgT:200};PTS.length=0;POPS.length=0;}
 function updateS4(){
   s4.timer++;s4.msgT=Math.max(0,s4.msgT-1);
-  if(s4.timer%55===0&&s4.bubs.filter(b=>b.alive).length<6)
-    s4.bubs.push({x:38+Math.random()*(W-76),y:H*.16+Math.random()*H*.22,r:19,vx:(Math.random()-.5)*.5,vy:-.3,w:Math.random()*6.28,alive:true,scale:1});
+  if(s4.timer%55===0&&s4.bubs.filter(b=>b.alive).length<6)s4.bubs.push({x:38+Math.random()*(W-76),y:H*.16+Math.random()*H*.22,r:19,vx:(Math.random()-.5)*.5,vy:-.3,w:Math.random()*6.28,alive:true,scale:1});
   for(const b of s4.bubs){
     if(!b.alive){b.scale=Math.max(0,b.scale-.08);continue;}
     b.w+=.025;b.x+=b.vx+Math.sin(b.w)*.5;b.y+=b.vy;b.vy=Math.min(b.vy+.03,1.8);
@@ -456,150 +437,128 @@ function updateS4(){
     if(b.y>=PIPY-b.r){b.y=PIPY-b.r;b.vy*=-.5;addP(b.x,PIPY,'#44ff88',3,1.5);}
   }
   for(let i=s4.bubs.length-1;i>=0;i--)if(!s4.bubs[i].alive&&s4.bubs[i].scale<=0)s4.bubs.splice(i,1);
-  tickP();gasG=Math.min(100,s4.delivered/s4.need*100);
+  tickP();tickPops();gasG=Math.min(100,s4.delivered/s4.need*100);
   if(s4.delivered>=s4.need&&!s4.done){s4.done=true;s4.msg='出荷完了！eメタンが街へ届く！';s4.msgT=9999;}
   if(s4.done){s4.doneT++;if(s4.doneT===110)startFade(ST.END);}
 }
 function tapS4(x,y){
   if(s4.done)return;
-  // 最も近い気泡を押す
   let best=null,bestD=99999;
-  for(const b of s4.bubs){
-    if(!b.alive)continue;
-    const dx=x-b.x,dy=y-b.y,d=dx*dx+dy*dy;
-    if(d<bestD&&d<(b.r+45)*(b.r+45)){bestD=d;best=b;}
-  }
+  for(const b of s4.bubs){if(!b.alive)continue;const dx=x-b.x,dy=y-b.y,d=dx*dx+dy*dy;if(d<bestD&&d<(b.r+48)*(b.r+48)){bestD=d;best=b;}}
   if(best){
     const dx=x-best.x,dy=y-best.y,d=Math.sqrt(dx*dx+dy*dy)||1;
-    best.vx+=dx/d*2.5;best.vy+=2.5;
-    burst(best.x,best.y,['#44ff88','#88ffcc'],6,3);
-    if(best.y>PIPY-60){best.alive=false;s4.delivered++;burst(best.x,PIPY,['#44ff88','#ffcc00','#88ffcc'],25,5);}
+    best.vx+=dx/d*2.5;best.vy+=2.5;burst(best.x,best.y,['#44ff88','#88ffcc'],6,3);
+    if(best.y>PIPY-60){best.alive=false;s4.delivered++;burst(best.x,PIPY,['#44ff88','#ffcc00','#88ffcc'],25,5);playPop();}
   }else{
-    // どこをタップしても近くの気泡を下に流す
-    for(const b of s4.bubs){if(!b.alive)continue;const dx=x-b.x,d=Math.sqrt(dx*dx+(y-b.y)*(y-b.y));if(d<160){b.vy+=1.2;b.vx+=dx/d*.8;}}
+    for(const b of s4.bubs){if(!b.alive)continue;const dx=x-b.x,d2=dx*dx+(y-b.y)*(y-b.y);if(d2<165*165){b.vy+=1.2;b.vx+=dx/Math.sqrt(d2||1)*.8;}}
     burst(x,y,['#44ff88'],5,2);
   }
 }
 function drawS4(){
-  drawBG();
+  drawCityBG();stageLabel('都市ガス配管');
   X.fillStyle='#181800';X.fillRect(0,PIPY,W,34);X.fillStyle='#252500';X.fillRect(0,PIPY,W,8);
   for(let px=10;px<W;px+=50){X.fillStyle='#2a2a00';X.fillRect(px,PIPY-12,18,12);X.fillStyle='#383800';X.fillRect(px+3,PIPY-9,12,9);}
   T('🏠 都市ガス管 🏭',W/2,PIPY+17,11,'#aacc00');
-  if(s4.delivered>0){X.strokeStyle='rgba(68,255,100,.35)';X.lineWidth=3;X.setLineDash([10,6]);X.beginPath();X.moveTo(0,PIPY+22);X.lineTo(W,PIPY+22);X.stroke();X.setLineDash([]);}
-  if(s4.timer<100){X.globalAlpha=.4+Math.sin(frame*.15)*.35;T('↓ タップして押し込め ↓',W/2,H*.52,13,'#ffff66');X.globalAlpha=1;}
+  if(s4.delivered>0){X.strokeStyle='rgba(68,255,100,.38)';X.lineWidth=3;X.setLineDash([10,6]);X.beginPath();X.moveTo(0,PIPY+22);X.lineTo(W,PIPY+22);X.stroke();X.setLineDash([]);}
+  if(s4.timer<110){X.globalAlpha=.4+Math.sin(frame*.15)*.35;T('↓ タップして押し込め ↓',W/2,H*.52,13,'#ffff66');X.globalAlpha=1;}
   for(const b of s4.bubs){
     if(!b.alive){X.save();X.globalAlpha=b.scale;X.translate(b.x,b.y);X.scale(b.scale,b.scale);X.translate(-b.x,-b.y);}
-    drawChar('metan',b.x,b.y,b.r,'#44ff88');
-    T('eメタン',b.x,b.y+b.r+11,9,'#66ffaa');
+    drawChar('metan',b.x,b.y,b.r,'#44ff88');T('eメタン',b.x,b.y+b.r+11,9,'#66ffaa');
     if(!b.alive)X.restore();
   }
-  drawP();drawHUD();
-  T('STAGE 4 ― 都市ガスしゅっか',W/2,34,15,'#44ff88');
+  drawP();drawPops();drawHUD();
+  T('STAGE 4 ― 都市ガス出荷',W/2,34,15,'#44ff88');
   T('出荷 '+s4.delivered+' / '+s4.need,W/2,57,12,'#226644');
   if(s4.msgT>0)msgBar(s4.msg,Math.min(1,s4.msgT/30));
 }
 
 // ============================================================
-//  ENDING
+//  ENDING ― 3シーン
 // ============================================================
-let endT=0,endP=0;
-function initEnd(){endT=0;endP=0;PTS.length=0;}
+let endT=0,endScene=0;
+function initEnd(){endT=0;endScene=0;PTS.length=0;POPS.length=0;}
 function updateEnd(){
   endT++;
-  if(endT===70)endP=1;
-  if(endT===130){endP=2;burst(W/2,H*.55,['#44ff88','#ffff00','#ff8800','#88ffcc'],70,10);}
-  if(endT>200&&endT%32===0)burst(Math.random()*W,Math.random()*H*.5,['#ffff44','#44ff88'],12,5);
+  if(endT===55)endScene=1;
+  if(endT===140)endScene=2;
+  if(endT===225)endScene=3;
+  if(endT===320)endScene=4;
+  if(endT>280&&endT%28===0)burst(Math.random()*W,Math.random()*H*.38,['#ffff44','#44ff88','#ff8844'],10,5);
   tickP();
 }
 function drawEnd(){
-  X.fillStyle='#020810';X.fillRect(0,0,W,H);
-  for(const s of STARS){s.t+=.02;X.globalAlpha=.48+Math.sin(s.t)*.28;X.fillStyle='#fff';X.fillRect(Math.round(s.x),Math.round(s.y),s.s,s.s);}
-  X.globalAlpha=1;drawP();
-  if(endP>=1){
-    // 家
-    [[32,H*.53,'🔥'],[148,H*.48,'🍳'],[262,H*.51,'♨']].forEach(([x,y,icon])=>{
-      X.fillStyle='#992200';X.beginPath();X.moveTo(x,y);X.lineTo(x+72,y);X.lineTo(x+36,y-37);X.closePath();X.fill();
-      X.fillStyle='#f0e0b0';X.fillRect(x+5,y,62,52);
-      X.shadowColor='#ffcc44';X.shadowBlur=10;X.fillStyle='rgba(255,228,70,.88)';
-      X.fillRect(x+7,y+8,16,12);X.fillRect(x+49,y+8,16,12);X.shadowBlur=0;
-      T(icon,x+36,y+30,18,'#ffaa00');
-    });
-    // 工場
-    X.fillStyle='#0a1a0a';X.fillRect(W/2-42,H*.63,84,55);X.fillRect(W/2-60,H*.74,28,44);X.fillRect(W/2+32,H*.74,28,44);
-    X.fillStyle='#0e220e';X.fillRect(W/2-6,H*.58,11,22);X.fillRect(W/2+9,H*.55,10,24);X.fillRect(W/2-19,H*.61,10,19);
-    X.fillStyle='rgba(68,255,88,.22)';
-    [0,1,2].forEach(i=>{const cx=[W/2,W/2+14,W/2-14][i],cy=H*.58-20+Math.sin(frame*.05+i)*5;X.beginPath();X.arc(cx,cy,9,0,Math.PI*2);X.fill();});
-    X.shadowColor='#ffcc44';X.shadowBlur=6;X.fillStyle='rgba(255,240,60,.85)';
-    [[W/2-8,H*.65],[W/2+10,H*.65],[W/2-8,H*.73],[W/2+10,H*.73]].forEach(([px,py])=>{X.fillRect(px,py,12,9);});
-    X.shadowBlur=0;
-    T('eメタン工場',W/2,H*.72,10,'#44cc66');
-    // ガス管
-    X.fillStyle='#222208';X.fillRect(0,H*.73,W,15);
-    X.strokeStyle='rgba(68,255,80,.5)';X.lineWidth=2.5;X.setLineDash([10,6]);
-    X.beginPath();X.moveTo(0,H*.737);X.lineTo(W,H*.737);X.stroke();X.setLineDash([]);
-    T('都市ガス管',W/2,H*.73+22,10,'#99bb00');
-  }
-  // メインメッセージ
-  const p=Math.sin(frame*.07)*.05+.97;
-  X.save();X.translate(W/2,H*.1);X.scale(p,p);
-  X.fillStyle='rgba(0,14,7,.93)';X.fillRect(-175,-28,350,62);
-  X.strokeStyle='#44ff88';X.lineWidth=2;X.strokeRect(-175,-28,350,62);
+  drawCityBG();drawP();
+  // header
+  const pu=Math.sin(frame*.07)*.04+.97;
+  X.save();X.translate(W/2,H*.1);X.scale(pu,pu);
+  X.fillStyle='rgba(0,14,7,.94)';X.fillRect(-175,-28,350,60);X.strokeStyle='#44ff88';X.lineWidth=2;X.strokeRect(-175,-28,350,60);
   T('CO₂はエネルギーに',0,-12,18,'#44ff88');T('生まれ変わった！',0,11,18,'#44ff88');X.restore();
-  if(endT>140){
-    const a=Math.min(1,(endT-140)/50);X.globalAlpha=a;
-    X.fillStyle='rgba(0,7,3,.9)';X.fillRect(8,H*.775,W-16,76);
-    X.strokeStyle='rgba(68,255,136,.22)';X.lineWidth=1;X.strokeRect(8,H*.775,W-16,76);
-    T('知多市では実際に',W/2,H*.795,13,'#88ffcc');
-    T('eメタンの実証が行われています',W/2,H*.82,13,'#88ffcc');
-    T('CO₂ → 水素 → eメタン → 都市ガス',W/2,H*.845,11,'#557766');
+  // gas pipe
+  X.fillStyle='#1c1c00';X.fillRect(0,H*.72,W,16);
+  X.strokeStyle='rgba(68,255,80,.5)';X.lineWidth=2.5;X.setLineDash([10,6]);X.beginPath();X.moveTo(0,H*.728);X.lineTo(W,H*.728);X.stroke();X.setLineDash([]);
+  T('都市ガス管',W/2,H*.72+22,10,'#99bb00');
+  // scene cards
+  const scenes=[['🛁','お風呂が沸いた！','#4488ff',40,H*.28,55,140],['🍳','ご飯ができた！','#ff8844',150,H*.32,140,225],['🏭','工場が動き出した！','#44ff88',258,H*.29,225,310]];
+  scenes.forEach(([icon,label,col,x,y,showAt])=>{
+    if(endT<showAt)return;
+    const aa=Math.min(1,(endT-showAt)/40);X.globalAlpha=aa;
+    X.fillStyle='rgba(4,12,28,.94)';X.fillRect(x-2,y-2,82,88);X.strokeStyle=col;X.lineWidth=2;X.strokeRect(x-2,y-2,82,88);
+    X.shadowColor=col;X.shadowBlur=12+Math.sin(frame*.08)*4;T(icon,x+39,y+32,28,col);X.shadowBlur=0;
+    T(label,x+39,y+68,9,col);
+    // pipe connection
+    X.strokeStyle=`rgba(68,255,100,.25)`;X.lineWidth=1;X.setLineDash([4,4]);
+    X.beginPath();X.moveTo(x+39,y+84);X.lineTo(x+39,H*.72);X.stroke();X.setLineDash([]);
+    X.globalAlpha=1;
+  });
+  // final message
+  if(endScene>=4){
+    const af=Math.min(1,(endT-320)/65);X.globalAlpha=af;
+    X.fillStyle='rgba(0,5,18,.96)';X.fillRect(5,H*.49,W-10,H*.225);
+    X.strokeStyle='rgba(68,255,136,.38)';X.lineWidth=1.5;X.strokeRect(5,H*.49,W-10,H*.225);
+    const lines=['CO₂はゴミではありません。',
+      '知多市では下水処理で発生したCO₂を','利用しeメタンを作る実証が行われています。',
+      '捨てられるはずだったCO₂は','新しいエネルギーに生まれ変わりました。'];
+    lines.forEach((l,i)=>T(l,W/2,H*.505+i*27,11,'#88ffcc'));
     X.globalAlpha=1;
   }
-  if(endT>290){
-    X.globalAlpha=.62+Math.sin(frame*.1)*.33;
-    X.fillStyle='#112a1a';X.fillRect(W/2-102,H-76,204,48);
-    X.strokeStyle='#44ff88';X.lineWidth=2.5;X.strokeRect(W/2-102,H-76,204,48);
-    T('もう一度あそぶ',W/2,H-53,16,'#88ffcc');X.globalAlpha=1;
+  if(endT>420){
+    X.globalAlpha=.6+Math.sin(frame*.1)*.35;
+    X.fillStyle='#112a1a';X.fillRect(W/2-104,H-72,208,46);X.strokeStyle='#44ff88';X.lineWidth=2.5;X.strokeRect(W/2-104,H-72,208,46);
+    T('もう一度あそぶ',W/2,H-50,16,'#88ffcc');X.globalAlpha=1;
   }
 }
 
 // ============================================================
-//  入力ハンドラ
+//  Input
 // ============================================================
 function onTap(x,y){
   if(fd.dir!==0)return;
+  ensureAudio();
   if(state===ST.TITLE){burst(x,y,['#44ff88','#ffff00'],15,5);startFade(ST.S1);}
   else if(state===ST.S1)tapS1(x,y);
   else if(state===ST.S3)tapS3(x,y);
   else if(state===ST.S4)tapS4(x,y);
-  else if(state===ST.END&&endT>290&&y>H-76&&y<H-28&&x>W/2-102&&x<W/2+102)startFade(ST.TITLE);
+  else if(state===ST.END&&endT>420&&y>H-72&&y<H-26&&x>W/2-104&&x<W/2+104)startFade(ST.TITLE);
 }
-function onMove(x,y){
-  if(state===ST.S2)tapS2(x,y);
-  else if(state===ST.S4)tapS4(x,y);
-}
-
+function onMove(x,y){if(state===ST.S2)tapS2(x,y);else if(state===ST.S4)tapS4(x,y);}
 C.addEventListener('touchstart',e=>{const p=getPos(e);onTap(p.x,p.y);},{passive:false});
 C.addEventListener('touchmove',e=>{const p=getPos(e);onMove(p.x,p.y);},{passive:false});
 C.addEventListener('click',e=>{const p=getPos(e);onTap(p.x,p.y);});
 C.addEventListener('mousemove',e=>{if(e.buttons){const p=getPos(e);onMove(p.x,p.y);}});
 
 // ============================================================
-//  メインループ
+//  Main Loop
 // ============================================================
 initTitle();
-
 function loop(){
   try{
-    frame++;
-    X.clearRect(0,0,W,H);
-    updateFade();
+    frame++;X.clearRect(0,0,W,H);updateFade();
     if(state===ST.TITLE){updateTitle();drawTitle();}
     else if(state===ST.S1){updateS1();drawS1();}
     else if(state===ST.S2){updateS2();drawS2();}
     else if(state===ST.S3){updateS3();drawS3();}
     else if(state===ST.S4){updateS4();drawS4();}
     else if(state===ST.END){updateEnd();drawEnd();}
-    // フェードオーバーレイ（常に最前面）
     if(fd.a>0){X.fillStyle=`rgba(0,0,0,${fd.a})`;X.fillRect(0,0,W,H);}
   }catch(e){console.error('GameError:',e);}
   requestAnimationFrame(loop);
