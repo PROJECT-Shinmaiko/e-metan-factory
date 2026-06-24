@@ -114,6 +114,7 @@ const SSAY=['✨ eメタン誕生！ ✨','✨ エネルギー進化！ ✨','�
 // ── Images ─────────────────────────────────────────────────
 const IM={};
 ['co2','h2','metan'].forEach(k=>{const i=new Image();i.src=k==='metan'?'emetan.png':k+'.png';IM[k]=i;});
+const S4BG=new Image();S4BG.src='s4bg.png';
 function drawChar(k,x,y,r,glow){
   x=Math.round(x);y=Math.round(y);
   if(glow){X.shadowColor=glow;X.shadowBlur=32;}
@@ -458,8 +459,18 @@ function tap4(x,y){
   }else{for(const b of s4.bubs){if(!b.alive)continue;const dx=x-b.x,d2=(x-b.x)**2+(y-b.y)**2;if(d2<210*210){b.vy+=1.1;b.vx+=dx/(Math.sqrt(d2)||1)*.8;}}burst(x,y,['#44ff88'],6,2);}
 }
 function draw4(){
-  bgCity(0);
-  X.globalAlpha=.025;T('都市ガス配管',W/2,H/2,26,'#fff');X.globalAlpha=1;
+  // background image (s4bg.png) — fallback to generated city
+  if(S4BG.complete&&S4BG.naturalWidth>0){
+    // cover-fit: fill canvas keeping aspect ratio, centered
+    const bw=S4BG.naturalWidth,bh=S4BG.naturalHeight;
+    const sc=Math.max(W/bw,H/bh);
+    const dw=bw*sc,dh=bh*sc;
+    X.drawImage(S4BG,(W-dw)/2,(H-dh)/2,dw,dh);
+    // slight dark overlay so game elements stay readable
+    X.fillStyle='rgba(0,0,10,.38)';X.fillRect(0,0,W,H);
+  }else{
+    bgCity(0);
+  }
   X.fillStyle='#181800';X.fillRect(0,PIPY,W,42);
   X.fillStyle=`rgba(68,255,100,${.45+Math.sin(frame*.06)*.2})`;X.fillRect(0,PIPY,W,9);
   for(let px=14;px<W;px+=58){X.fillStyle='#252500';X.fillRect(px,PIPY-18,26,18);}
